@@ -56,7 +56,7 @@ try:
             "duree_sup_5h": df["trip_duration_min"] > 300,
             "distance_nulle_ou_aberrante": (df["trip_distance"] <= 0) | (df["trip_distance"] > 300),
             "montant_negatif_ou_nul": (df["fare_amount"] <= 0) | (df["total_amount"] <= 0),
-            "montant_aberrant": df["total_amount"] > 1000,
+            "montant_aberrant": df["total_amount"] > 1000
         }
         rejected = pd.Series(False, index=df.index)
         for mask in rules.values():
