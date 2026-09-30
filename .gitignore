@@ -1,0 +1,9 @@
+/raw_data
+
+__pycache__
+
+gateway/node_modules
+gateway/.env
+
+# Base de données
+*.db
