@@ -33,7 +33,8 @@ def initialiser_bdd():
         # ------------------------------------------------ 
         curseur.execute("""
                 CREATE TABLE IF NOT EXISTS Courses (
-                    VendorID TEXT PRIMARY KEY,
+                    id_course INTEGER PRIMARY KEY AUTOINCREMENT,
+                    VendorID INT,
                     tpep_pickup_datetime DATETIME,
                     tpep_dropoff_datetime DATETIME,
                     passenger_count REAL,
@@ -120,11 +121,12 @@ def inserer_courses():
         print(f"Nombre de courses : {len(df_courses_final)}")
 
         df_courses_final.to_sql(
-            "courses",
+            "Courses",
             connexion,
             if_exists="append",
             index=False
         )
+        print(f"Nombre de courses : {len(df_courses_final)}")
 
         connexion.commit()
 
