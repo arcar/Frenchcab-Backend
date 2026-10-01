@@ -73,6 +73,7 @@ try:
         return df.reset_index(drop=True)
 
     df = transform(parquet_df, year, month)
+    
 except FileNotFoundError:
     print("File not found:", parquet_df)
 except Exception as e:
