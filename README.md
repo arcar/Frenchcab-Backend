@@ -9,7 +9,26 @@ Pour ce projet, les outils suivants doivent être installés :
 * FastAPI
 * sqlite3
 
-## Présentation et Reste à faire
+## Données sources
+
+Le jeu de données n'est pas versionné dans le dépôt : il doit être téléchargé manuellement.
+
+1. À la racine du backend, créer un dossier `raw_data` :
+
+
+2. Télécharger un fichier **Yellow Taxi Trip Records** au format Parquet depuis le site de la TLC :
+   [https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page](https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page)
+
+3. Placer le fichier téléchargé dans `raw_data/`.
+
+Arborescence attendue :
+
+```
+Frenchcab-Backend/
+├── raw_data/
+│   └── yellow_tripdata_2026-01.parquet
+├── ...
+```
 
 ### Règles appliquées
 
