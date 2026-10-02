@@ -39,7 +39,9 @@ def charger_donnees_analytiques():
             FROM Faits_Prediction fp
 
             LEFT JOIN Dim_Temps dt
-                ON fp.id_temps_d = dt.id_temps;
+                ON fp.id_temps_d = dt.id_temps
+            
+            LIMIT 700000;
             """
     df = pd.read_sql_query(requete, connexion)
 

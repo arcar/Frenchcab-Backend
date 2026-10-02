@@ -7,45 +7,86 @@ from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
 
-from .preparation import preparer_dataframe_ml, charger_donnees_analytiques
+from preparation import preparer_dataframe_ml, charger_donnees_analytiques
 
 #data
 df_ml = preparer_dataframe_ml(charger_donnees_analytiques())
 
-cat_cols = ["ID_location_pickup", "ID_location_dropoff", "heure_pickup"]
-num_cols = ["trip_distance", "store_and_fwd_flag", "est_weekend_pickup"]
+cat_cols = ["est_weekend", "nom_jour" ]
+num_cols = ["trip_distance","id_localisation_d", "id_localisation_a", "id_temps", "heure", "minute"]
 features = cat_cols + num_cols
+
 
 X = df_ml[features].copy()
 y = df_ml["trip_duration_min"]
 
-X["store_and_fwd_flag"] = X["store_and_fwd_flag"].map({"N": 0, "Y": 1})
-X["est_weekend_pickup"] = X["est_weekend_pickup"].astype(int)
+# X["nom_jour"] = X["nom_jour"].map({"Monday": 0, "Tuesday": 1, "Wednesday": 2, "Thursday": 3, "Friday": 4, "Saturday": 5, "Sunday":6})
+X["est_weekend"] = X["est_weekend"].astype(int)
 
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42
 )
 
-#Random Forest
-rf_model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
 
-#Linear Regression
+# ------------------------------------------------
+# Préprocesseur commun
+# ------------------------------------------------
+
+preprocessor = ColumnTransformer([
+    (
+        "cat",
+        OneHotEncoder(
+            handle_unknown="ignore"
+        ),
+        cat_cols
+    ),
+    (
+        "num",
+        "passthrough",
+        num_cols
+    )
+])
+
+# ------------------------------------------------
+# Pipeline Régression Linéaire
+# ------------------------------------------------
+
+# Linear Regression
 lin_model = Pipeline([
-    ("prep", ColumnTransformer([
-        ("cat", OneHotEncoder(handle_unknown="ignore"), cat_cols),
-        ("num", "passthrough", num_cols),
-    ])),
+    ("prep", preprocessor),
     ("reg", LinearRegression()),
 ])
 
+# ------------------------------------------------
+# Pipeline Random Forest
+# ------------------------------------------------
+
+rf_model = Pipeline([
+    (
+        "prep",
+        preprocessor
+    ),
+    (
+        "reg",
+        RandomForestRegressor(
+            n_estimators=100,
+            random_state=42,
+            n_jobs=-1
+        )
+    )
+])
+
+
 #entrainement et predictions 
 results = {}
-for name, model in [("Linear Regression", lin_model), ("Random Forest", rf_model)]:
+models = [("Linear Regression", lin_model), ("Random Forest", rf_model) ]
+for name, model in models:
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
     results[name] = {
         "MAE (min)": mean_absolute_error(y_test, y_pred),
-        "MAPE (%)": mean_absolute_percentage_error(y_test, y_pred) * 100,
+        "MAEP (%)": mean_absolute_percentage_error(y_test, y_pred) * 100,
     }
 
 print(pd.DataFrame(results).T.round(2))
+
