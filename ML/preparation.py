@@ -19,35 +19,34 @@ print("Base SQLite :", DB_PATH)
 # ---------------------------------
 
 def charger_donnees_analytiques():
-    connexion = sqlite3.connect(chemin_bdd)
+    connexion = sqlite3.connect(DB_PATH)
 
     requete = """
-    SELECT
-        fp.trip_duration_min,
-        fp.passenger_count,
-        fp.trip_distance,
-        fp.store_and_fwd_flag,
+            SELECT
+            fp.trip_duration_min,
+            fp.trip_distance,
 
-        dt.heure,
-        dt.minute,
-        dt.nom_jour,
-        dt.est_weekend,
-        dt.mois,
+            dt.id_temps,
+            dt.heure,
+            dt.minute,
+            dt.nom_jour,
+            dt.est_weekend,
+            dt.mois,
 
-        fp.ID_Location_pickup,
-        fp.ID_Location_dropoff
+            fp.id_localisation_d,
+            fp.id_localisation_a
 
-        FROM Faits_Prediction fp
+            FROM Faits_Prediction fp
 
-        LEFT JOIN Dim_Temps dt
-        ON fp.ID_temps_pickup = dt.ID_temps;
-    """
-
+            LEFT JOIN Dim_Temps dt
+                ON fp.id_temps_d = dt.id_temps;
+            """
     df = pd.read_sql_query(requete, connexion)
 
     connexion.close()
 
     return df
+    
 
 # ---------------------------------
 # PREPARATION DATAFRAME
@@ -57,11 +56,14 @@ def preparer_dataframe_ml(df):
     df_ml = df.copy()
 
     colonnes_ml = [
-        "ID_temps",
-        "ID_Location",
-        "store_and_fwd_flag",
+        "id_temps",
+        "heure",
+        "minute",
+        "nom_jour",
+        "est_weekend",
+        "id_localisation_d",
+        "id_localisation_a",
         "trip_duration_min",
-        "passenger_count",
         "trip_distance"
     ]
 
@@ -87,7 +89,6 @@ if __name__ == "__main__":
     df_correlation = pd.get_dummies(
         df_ml,
         columns=[
-            "store_and_fwd_flag",
             "nom_jour"
         ],
         drop_first=False
