@@ -118,8 +118,6 @@ def inserer_courses():
         print("Données qui vont être insérées :")
         print(df_courses_final.head())
 
-        print(f"Nombre de courses : {len(df_courses_final)}")
-
         df_courses_final.to_sql(
             "Courses",
             connexion,
