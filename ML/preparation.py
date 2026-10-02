@@ -18,7 +18,7 @@ print("Base SQLite :", DB_PATH)
 # CHARGEMENT DES DONNEES DE LA BASE ANALYTIQUE
 # ---------------------------------
 
-def charger_donnees_analytiques():
+def charger_donnees_analytiques(limit=None):
     connexion = sqlite3.connect(DB_PATH)
 
     requete = """
@@ -40,15 +40,15 @@ def charger_donnees_analytiques():
 
             LEFT JOIN Dim_Temps dt
                 ON fp.id_temps_d = dt.id_temps
-            
-            LIMIT 700000;
             """
+    if limit is not None:
+        requete += f" LIMIT {limit}"
+
     df = pd.read_sql_query(requete, connexion)
 
     connexion.close()
 
     return df
-    
 
 # ---------------------------------
 # PREPARATION DATAFRAME

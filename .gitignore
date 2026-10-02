@@ -7,3 +7,4 @@ gateway/.env
 
 # Base de données
 *.db
+*.pkl
