@@ -29,37 +29,64 @@ def initialiser_bdd():
         curseur = connexion.cursor()
     
         # ------------------------------------------------
-        # TABLE COURSES
+        # TABLE DIM_TEMPS
         # ------------------------------------------------ 
+
+        curseur.execute("PRAGMA foreign_keys = ON;")
+
         curseur.execute("""
-                CREATE TABLE IF NOT EXISTS Courses (
-                    id_course INTEGER PRIMARY KEY AUTOINCREMENT,
-                    VendorID INT,
-                    tpep_pickup_datetime DATETIME,
-                    tpep_dropoff_datetime DATETIME,
-                    passenger_count REAL,
-                    trip_distance REAL,
-                    RatecodeID REAL,
-                    store_and_fwd_flag STRING,
-                    PULocationID INT,
-                    DOLocationID INT,
-                    payment_type INT,
-                    fare_amount REAL,
-                    extra REAL,
-                    mta_tax REAL,
-                    tip_amount REAL,
-                    tolls_amount REAL,
-                    improvement_surcharge REAL,
-                    total_amount REAL,
-                    congestion_surcharge REAL,
-                    Airport_fee REAL,
-                    cbd_congestion_fee REAL,
-                    trip_duration_min REAL,
-                    pickup_hour INT,
-                    pickup_weekday INT
-                );
-                """)
+                 CREATE TABLE IF NOT EXISTS Dim_Temps (
+                        id_temps INTEGER PRIMARY KEY AUTOINCREMENT,
+                        date_complete DATETIME,
+                        annee INT,
+                        mois INT,
+                        jour DATE,
+                        heure TIME,
+                        minute TIME,
+                        seconde TIME,
+                        nom_jour TEXTE,
+                        est_weekend BOOLEAN,
+                        trimestre INT                                    
+                            );
+                        """)
+        # ------------------------------------------------
+        # TABLE DIM_LOCALISATION
+        # ------------------------------------------------ 
     
+        curseur.execute("""
+                 CREATE TABLE IF NOT EXISTS Dim_Localisation (
+                        id_localisation INTEGER PRIMARY KEY                            
+                        );
+                        """)
+        
+        # ------------------------------------------------
+        # TABLE FAITS_PREDICTION
+        # ------------------------------------------------ 
+
+        curseur.execute("""
+                 CREATE TABLE IF NOT EXISTS Faits_Prediction (
+                        id_faits INTEGER PRIMARY KEY AUTOINCREMENT,
+                        id_temps_d INT,
+                        id_localisation_d INT,
+                        id_temps_a INT,
+                        id_localisation_a INT,
+                        store_and_fwd_flag STRING,
+                        trip_duration_min REAL,
+
+                        FOREIGN KEY (id_temps_d) 
+                            REFERENCES DIM_TEMPS (id_temps),
+
+                        FOREIGN KEY (id_temps_a) 
+                            REFERENCES DIM_TEMPS (id_temps),
+
+                        FOREIGN KEY (id_localisation_d) 
+                            REFERENCES DIM_LOCALISATION (id_localisation),
+
+                        FOREIGN KEY (id_localisation_a) 
+                            REFERENCES DIM_LOCALISATION (id_localisation)
+                            );
+                        """)
+        
         # ------------------------------------------------
         # VALIDATION
         # ------------------------------------------------
@@ -76,73 +103,246 @@ def initialiser_bdd():
 
 
 # ============================================================
-# INSERTION DE LA TABLE COURSES
+# INSERTION DE LA TABLE DIM_TEMPS
 # ============================================================
-def inserer_courses():
 
+def inserer_dim_temps(df):
     connexion = sqlite3.connect(DB_PATH)
 
     try:
-# recupération des éléments du dataframe
-        courses = df.copy()
+    # traitement des doublons entre pickup et dropoff
 
-# Insertion des données récupérées
-        df_courses_final = courses[
-            [
-                "VendorID",
-                "tpep_pickup_datetime",
-                "tpep_dropoff_datetime",
-                "passenger_count",
-                "trip_distance",
-                "RatecodeID",
-                "store_and_fwd_flag",
-                "PULocationID",
-                "DOLocationID",
-                "payment_type",
-                "fare_amount",
-                "extra",
-                "mta_tax",
-                "tip_amount",
-                "tolls_amount",
-                "improvement_surcharge",
-                "total_amount",
-                "congestion_surcharge",
-                "Airport_fee",
-                "cbd_congestion_fee",
-                "trip_duration_min",
-                "pickup_hour",
-                "pickup_weekday"
-            ]
-        ]
-# Vérification
+        pickup = df[["tpep_pickup_datetime"]].copy()
+        pickup.columns = ["date_complete"]
+
+        dropoff = df[["tpep_dropoff_datetime"]].copy()
+        dropoff.columns = ["date_complete"]
+
+        df_temps = pd.concat([pickup, dropoff])
+
+        df_temps = df_temps.drop_duplicates()
+
+        df_temps["annee"] = df_temps["date_complete"].dt.year
+        df_temps["mois"] = df_temps["date_complete"].dt.month
+        df_temps["jour"] = df_temps["date_complete"].dt.day
+        df_temps["nom_jour"] = df_temps["date_complete"].dt.day_name()
+        df_temps["heure"] = df_temps["date_complete"].dt.hour
+        df_temps["minute"] = df_temps["date_complete"].dt.minute
+        df_temps["seconde"] = df_temps["date_complete"].dt.second
+
+        df_temps["est_weekend"] = (
+            df_temps["date_complete"].dt.dayofweek >= 5
+        ).astype(int)
+
+        df_temps["trimestre"] = (
+            df_temps["date_complete"].dt.quarter
+        )
+
         print("Données qui vont être insérées :")
-        print(df_courses_final.head())
+        print(df_temps.head())
 
-        df_courses_final.to_sql(
-            "Courses",
+        df_temps.to_sql(
+            "Dim_Temps",
             connexion,
             if_exists="append",
             index=False
         )
-        print(f"Nombre de courses : {len(df_courses_final)}")
 
         connexion.commit()
 
-        print(f"{len(df_courses_final)} lignes insérées dans la table courses.")
+    finally:
+        connexion.close()
+
+# ============================================================
+# INSERTION DE LA TABLE DIM_LOCALISATION
+# ============================================================
+def inserer_dim_localisation():
+
+    connexion = sqlite3.connect(DB_PATH)
+
+    try:
+        # Récupération des localisations de départ
+        pickup = df[["PULocationID"]].copy()
+        pickup.columns = ["id_localisation"]
+
+        # Récupération des localisations d'arrivée
+        dropoff = df[["DOLocationID"]].copy()
+        dropoff.columns = ["id_localisation"]
+
+        # Réunion des deux listes
+        localisation = pd.concat([pickup, dropoff])
+
+        # Suppression des doublons et valeurs manquantes
+        df_localisation_finale = (
+            localisation
+            .drop_duplicates()
+            .dropna()
+        )
+
+        # Vérification
+        print("Données qui vont être insérées :")
+        print(df_localisation_finale.head())
+
+        print(f"Nombre de lieux : {len(df_localisation_finale)}")
+
+        # Insertion
+        df_localisation_finale.to_sql(
+            "Dim_Localisation",
+            connexion,
+            if_exists="append",
+            index=False
+        )
+
+        connexion.commit()
+
+        print(
+            f"{len(df_localisation_finale)} lignes insérées "
+            "dans la table Dim_Localisation."
+        )
+
+    except (sqlite3.Error, KeyError, ValueError) as erreur:
+        print("Erreur lors de l'insertion des lieux :", erreur)
+        connexion.rollback()
+
+    finally:
+        connexion.close()
+
+# ============================================================
+# INSERTION DE LA TABLE FAITS_PREDICTION
+# ============================================================
+def inserer_faits_prediction():
+
+    connexion = sqlite3.connect(DB_PATH)
+
+    try:
+        # ------------------------------------------------
+        # Récupération de la dimension temps depuis la BDD
+        # ------------------------------------------------
+        df_temps_bdd = pd.read_sql_query(
+            """
+            SELECT id_temps, date_complete
+            FROM Dim_Temps
+            """,
+            connexion
+        )
+
+        # Conversion en datetime pour garantir le même type
+        df_temps_bdd["date_complete"] = pd.to_datetime(
+            df_temps_bdd["date_complete"]
+        )
+
+        # ------------------------------------------------
+        # Copie du dataframe source
+        # ------------------------------------------------
+        df_faits = df.copy()
+
+        # ------------------------------------------------
+        # Jointure pour récupérer id_temps_d
+        # ------------------------------------------------
+        df_faits = df_faits.merge(
+            df_temps_bdd,
+            left_on="tpep_pickup_datetime",
+            right_on="date_complete",
+            how="left"
+        )
+
+        df_faits = df_faits.rename(
+            columns={"id_temps": "id_temps_d"}
+        )
+
+        df_faits = df_faits.drop(
+            columns=["date_complete"]
+        )
+
+        # ------------------------------------------------
+        # Jointure pour récupérer id_temps_a
+        # ------------------------------------------------
+        df_faits = df_faits.merge(
+            df_temps_bdd,
+            left_on="tpep_dropoff_datetime",
+            right_on="date_complete",
+            how="left"
+        )
+
+        df_faits = df_faits.rename(
+            columns={"id_temps": "id_temps_a"}
+        )
+
+        df_faits = df_faits.drop(
+            columns=["date_complete"]
+        )
+
+        # ------------------------------------------------
+        # Localisations
+        # ------------------------------------------------
+        df_faits["id_localisation_d"] = (
+            df_faits["PULocationID"]
+        )
+
+        df_faits["id_localisation_a"] = (
+            df_faits["DOLocationID"]
+        )
+
+        # ------------------------------------------------
+        # Sélection finale des colonnes
+        # ------------------------------------------------
+        df_faits_final = df_faits[
+            [
+                "id_temps_d",
+                "id_localisation_d",
+                "id_temps_a",
+                "id_localisation_a",
+                "store_and_fwd_flag",
+                "trip_duration_min"
+            ]
+        ]
+
+        # ------------------------------------------------
+        # Suppression des lignes incomplètes
+        # ------------------------------------------------
+        df_faits_final = df_faits_final.dropna()
+
+        # ------------------------------------------------
+        # Vérification
+        # ------------------------------------------------
+        print("Données qui vont être insérées :")
+        print(df_faits_final.head())
+
+        print(f"Nombre de faits : {len(df_faits_final)}")
+
+        # ------------------------------------------------
+        # Insertion dans la table
+        # ------------------------------------------------
+        df_faits_final.to_sql(
+            "Faits_Prediction",
+            connexion,
+            if_exists="append",
+            index=False
+        )
+
+        connexion.commit()
+
+        print(
+            f"{len(df_faits_final)} lignes insérées "
+            "dans Faits_Prediction."
+        )
 
     except (sqlite3.Error, KeyError, ValueError) as erreur:
 
-        print("Erreur lors de l'insertion des courses :",erreur)
+        print("Erreur lors de l'insertion " "des faits :",erreur)
 
         connexion.rollback()
 
     finally:
-
         connexion.close()
+
 
 # ============================================================
 # EXECUTION
 # ============================================================
 if __name__ == "__main__":
+
     initialiser_bdd()
-    inserer_courses()
+    inserer_dim_temps(df)
+    inserer_dim_localisation()
+    inserer_faits_prediction()
