@@ -77,28 +77,95 @@ Le Frontend a été dockerisé.
 
 Les images docker sont sur **Dockerhub**, et s'active via le fichier `ci.yml` dans ce repo, il suffit donc de faire actuellement un `push` sur la branche `staging`. A terme il semble plus judicieux de modifier `ci.yml` pour qu'il s'active sur un `push` sur la branche `dev`.
 
-
-## Présentation et Reste à faire
-
-### Règles appliquées
-
-Chaque ligne est vérifiée selon les règles suivantes. Une ligne qui en enfreint au moins une est exclue du jeu de données.
-
-| Règle | Condition | Justification |
-|---|---|---|
-| `date_invalide` | Date de prise en charge ou de dépose manquante | Impossible de calculer la durée du trajet |
-| `hors_periode` | Trajet en dehors de la période couverte par le fichier | Donnée incohérente avec la source |
-| `duree_negative_ou_nulle` | Durée du trajet ≤ 0 minute | Erreur de saisie ou d'horodatage |
-| `duree_sup_5h` | Durée du trajet > 300 minutes | Valeur aberrante pour une course en taxi |
-| `distance_nulle_ou_aberrante` | Distance ≤ 0 ou > 300 miles | Course non effectuée ou erreur de compteur |
-| `montant_negatif_ou_nul` | Tarif (`fare_amount`) ou montant total (`total_amount`) ≤ 0 | Remboursement, annulation ou erreur |
-| `montant_aberrant` | Montant total > 1 000 $ | Valeur aberrante |
+## Traitement des données
 
 ### Gestion des valeurs manquantes restantes
 
-Après application des règles, certaines colonnes contenaient encore des valeurs manquantes (NaN) sur plusieurs colonnes à la fois. Ces valeurs ont été **remplacées par une valeur par défaut** plutôt que supprimées, pour la raison suivante :
+Après application des règles de nettoyage, certaines colonnes contenaient encore
+des valeurs manquantes (`NaN`).
 
-- ces colonnes n'ont pas d'impact direct sur les prédictions ;
-- en revanche, les autres colonnes de ces mêmes lignes sont, elles, nécessaires à la prédiction.
+Pour certaines colonnes, ces valeurs ont été remplacées par des valeurs par défaut
+plutôt que de supprimer entièrement les lignes concernées.
 
-Supprimer toutes les lignes contenant un NaN aurait donc entraîné une perte importante de données utiles au modèle.
+Ce choix permet de conserver les informations utiles présentes sur ces lignes,
+notamment celles pouvant servir à l'analyse ou à la prédiction.
+
+---
+
+### Pipeline ETL
+
+Le traitement des données est organisé en trois étapes :
+
+1. `Extract.py`
+   - charge les données sources au format Parquet ;
+
+2. `Transform.py`
+   - convertit les types ;
+   - traite certaines valeurs manquantes ;
+   - supprime les doublons ;
+   - calcule notamment la durée de trajet ;
+   - filtre les valeurs aberrantes ;
+
+3. `Load.py`
+   - initialise la base SQLite ;
+   - crée les tables analytiques ;
+   - insère les données transformées.
+
+Pour exécuter l'ETL, lancer :
+
+```bash
+python ETL/Load.py
+```
+## Machine Learning
+
+### Objectif
+
+Le modèle de Machine Learning a pour objectif de **prédire la durée d'une course de taxi**.
+
+La variable cible utilisée est :
+
+```text
+trip_duration_min
+```
+Cette durée est calculée en amont dans le traitement des données à partir de :
+```
+tpep_pickup_datetime
+tpep_dropoff_datetime
+```
+### Chargement des données analytiques
+Les données utilisées pour l'entraînement sont chargées depuis la base SQLite :
+```
+ETL/frenchcab.db
+```
+### Les principales variables utilisées sont :
+```
+trip_distance
+heure
+minute
+mois
+est_weekend
+nom_jour
+id_localisation_d
+id_localisation_a
+```
+### Préparation des données
+Les données sont préparées dans le fichier :
+```
+ML/preparation.py
+```
+### Modèles testés
+Deux modèles sont comparés :
+```
+LinearRegression
+RandomForestRegressor
+```
+
+## Entrainement ML
+
+Lancer le fichier `entrainement.py` pour créer le modèle du ML `modele_temps_trajet.pkl"`, qui sera dans le dossier `ML`.
+
+## Prédiction
+
+Lancer le fichier `prediction.py` pour avoir une prédiction.
+
+
