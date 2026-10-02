@@ -72,6 +72,7 @@ def initialiser_bdd():
                         id_localisation_a INT,
                         store_and_fwd_flag STRING,
                         trip_duration_min REAL,
+                        trip_distance REAL,
 
                         FOREIGN KEY (id_temps_d) 
                             REFERENCES DIM_TEMPS (id_temps),
@@ -293,7 +294,8 @@ def inserer_faits_prediction():
                 "id_temps_a",
                 "id_localisation_a",
                 "store_and_fwd_flag",
-                "trip_duration_min"
+                "trip_duration_min",
+                "trip_distance"
             ]
         ]
 
