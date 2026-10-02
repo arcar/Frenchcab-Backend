@@ -8,19 +8,11 @@ from pathlib import Path
 # ---------------------------------
 # CONNEXION BASE ANALYTIQUEs
 # ---------------------------------
+DOSSIER_SCRIPT = Path(__file__).resolve().parent
 
+DB_PATH = (DOSSIER_SCRIPT.parent/ "ETL"/ "frenchcab.db")
 
-dossier_script = Path(__file__).resolve().parent
-
-chemin_bdd = dossier_script / "frenchcab.db"
-
-print("Base SQLite :", chemin_bdd)
-
-DATABASE_PATH = "frenchcab.db"
-
-connexion = sqlite3.connect(chemin_bdd)
-curseur = connexion.cursor()
-
+print("Base SQLite :", DB_PATH)
 
 # ---------------------------------
 # CHARGEMENT DES DONNEES DE LA BASE ANALYTIQUE
