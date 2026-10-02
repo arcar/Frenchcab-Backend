@@ -20,7 +20,6 @@ features = cat_cols + num_cols
 X = df_ml[features].copy()
 y = df_ml["trip_duration_min"]
 
-# X["nom_jour"] = X["nom_jour"].map({"Monday": 0, "Tuesday": 1, "Wednesday": 2, "Thursday": 3, "Friday": 4, "Saturday": 5, "Sunday":6})
 X["est_weekend"] = X["est_weekend"].astype(int)
 
 X_train, X_test, y_train, y_test = train_test_split(
@@ -33,18 +32,11 @@ X_train, X_test, y_train, y_test = train_test_split(
 # ------------------------------------------------
 
 preprocessor = ColumnTransformer([
-    (
-        "cat",
-        OneHotEncoder(
-            handle_unknown="ignore"
-        ),
+    ("cat",
+        OneHotEncoder(handle_unknown="ignore"),
         cat_cols
     ),
-    (
-        "num",
-        "passthrough",
-        num_cols
-    )
+    ("num", "passthrough", num_cols)
 ])
 
 # ------------------------------------------------
@@ -62,12 +54,8 @@ lin_model = Pipeline([
 # ------------------------------------------------
 
 rf_model = Pipeline([
-    (
-        "prep",
-        preprocessor
-    ),
-    (
-        "reg",
+    ("prep",preprocessor),
+    ( "reg",
         RandomForestRegressor(
             n_estimators=100,
             random_state=42,
