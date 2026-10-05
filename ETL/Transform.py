@@ -1,5 +1,8 @@
 from Extract import parquet_df, pd, year, month
 
+OUTPUT_PATH = "Frenchcab-Backend/raw_data/yellow_tripdata_propre.csv"
+
+
 colonnes_date = ["tpep_pickup_datetime", "tpep_dropoff_datetime"]
 colonnes_int = ["VendorID", "passenger_count", "RatecodeID", "PULocationID", "DOLocationID", "payment_type"]
 colonnes_float = ["fare_amount", "extra", "mta_tax", "tip_amount", "tolls_amount", "improvement_surcharge", "total_amount", "congestion_surcharge", "airport_fee", "cbd_congestion_fee"]
@@ -73,6 +76,7 @@ try:
         return df.reset_index(drop=True)
 
     df = transform(parquet_df, year, month)
+    df.to_csv(OUTPUT_PATH, index=False)
     
 except FileNotFoundError:
     print("File not found:", parquet_df)
