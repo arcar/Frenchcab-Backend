@@ -12,6 +12,8 @@ DOSSIER_ZONE = Path(__file__).resolve().parent.parent
 DOSSIER_SCRIPT = Path(__file__).resolve().parent
 DB_PATH = DOSSIER_SCRIPT / "frenchcab.db"
 ZONES_CSV = DOSSIER_ZONE / "raw_data" / "taxi_zone_lookup.csv"
+SQL_DB = DOSSIER_SCRIPT / "frenchcab_relationnelle.db"
+
 # ============================================================
 # CONNEXION SQLITE
 # ============================================================
@@ -401,6 +403,63 @@ def inserer_faits_prediction():
         connexion.close()
 
 
+# ===========================================================
+# CREATION ET CHARGEMENT BASE RELATIONNELLE
+# ============================================================
+def creer_db_relationnelle(df):
+
+    con = duckdb.connect(SQL_DB)
+
+    con.execute("""
+        CREATE OR REPLACE TABLE taxi_zones (
+            LocationID   INTEGER PRIMARY KEY,
+            Borough      VARCHAR,
+            Zone         VARCHAR,
+            service_zone VARCHAR
+        )
+    """)
+    con.execute(f"""
+        INSERT INTO taxi_zones
+        SELECT * FROM read_csv_auto('{ZONES_CSV.as_posix()}', header=true)
+    """)
+
+    con.register("df", df)
+    
+    con.execute("""
+        CREATE OR REPLACE TABLE yellowtripdata (
+            VendorID              INTEGER,
+            tpep_pickup_datetime  TIMESTAMP,
+            tpep_dropoff_datetime TIMESTAMP,
+            passenger_count       DOUBLE,
+            trip_distance         DOUBLE,
+            PULocationID          INTEGER REFERENCES taxi_zones(LocationID),
+            DOLocationID          INTEGER REFERENCES taxi_zones(LocationID),
+            total_amount          DOUBLE
+            
+        )
+    """)
+
+    con.execute(f"""
+        INSERT INTO yellowtripdata
+        SELECT VendorID, tpep_pickup_datetime, tpep_dropoff_datetime,
+               passenger_count, trip_distance, PULocationID, DOLocationID, total_amount
+        FROM df
+    """)
+
+    con.execute("""
+        CREATE OR REPLACE TABLE reservation (
+            ReservationID         INTEGER,
+            reservation_datetime  TIMESTAMP,
+            PULocationID          INTEGER REFERENCES taxi_zones(LocationID),
+            DOLocationID          INTEGER REFERENCES taxi_zones(LocationID),
+            passenger_count       DOUBLE        
+        )
+    """)
+
+    con.close()
+
+    print("Base relationnelle créée et chargée")
+
 # ============================================================
 # EXECUTION
 # ============================================================
@@ -411,3 +470,4 @@ if __name__ == "__main__":
     inserer_dim_localisation()
     inserer_dim_distance(df)
     inserer_faits_prediction()
+    creer_db_relationnelle(df)
