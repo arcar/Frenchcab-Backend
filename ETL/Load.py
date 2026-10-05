@@ -3,14 +3,15 @@ from pathlib import Path
 import pandas as pd
 from Transform import df
 import os
+import duckdb
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
-
+DOSSIER_ZONE = Path(__file__).resolve().parent.parent
 DOSSIER_SCRIPT = Path(__file__).resolve().parent
 DB_PATH = DOSSIER_SCRIPT / "frenchcab.db"
-
+ZONES_CSV = DOSSIER_ZONE / "raw_data" / "taxi_zone_lookup.csv"
 # ============================================================
 # CONNEXION SQLITE
 # ============================================================
@@ -24,7 +25,9 @@ curseur = connexion.cursor()
 
 def initialiser_bdd():
     connexion = sqlite3.connect(DB_PATH)
-   
+    connexion.execute("DROP TABLE IF EXISTS Faits_Prediction")
+    connexion.execute("DROP TABLE IF EXISTS Dim_Temps")
+    connexion.execute("DROP TABLE IF EXISTS Dim_Localisation")
     try:
         curseur = connexion.cursor()
     
@@ -55,7 +58,10 @@ def initialiser_bdd():
     
         curseur.execute("""
                  CREATE TABLE IF NOT EXISTS Dim_Localisation (
-                        id_localisation INTEGER PRIMARY KEY                            
+                        id_localisation INTEGER PRIMARY KEY,
+                        arrondissement VARCHAR,
+                        zone           VARCHAR,
+                        zone_service   VARCHAR                            
                         );
                         """)
         
@@ -157,56 +163,36 @@ def inserer_dim_temps(df):
 # ============================================================
 # INSERTION DE LA TABLE DIM_LOCALISATION
 # ============================================================
-def inserer_dim_localisation():
+def inserer_dim_localisation(db_path=DB_PATH, zones_csv=ZONES_CSV, trajets_csv=None):
 
-    connexion = sqlite3.connect(DB_PATH)
+    con = duckdb.connect(str(db_path))
+    
+    # connexion.execute(f"""
+    #     CREATE OR REPLACE TEMP VIEW trajets_src AS
+    #     SELECT * REPLACE (
+    #         CAST(tpep_pickup_datetime  AS TIMESTAMP) AS tpep_pickup_datetime,
+    #         CAST(tpep_dropoff_datetime AS TIMESTAMP) AS tpep_dropoff_datetime
+    #     )
+    #     FROM read_csv_auto('{trajets}')
+        # """)
+    
 
-    try:
-        # Récupération des localisations de départ
-        pickup = df[["PULocationID"]].copy()
-        pickup.columns = ["id_localisation"]
+    for nom, chemin in [("zones", zones_csv), ]:
+            if chemin is None or not Path(chemin).exists():
+                raise FileNotFoundError(f"Fichier {nom} introuvable : {chemin}")
+    zones = Path(zones_csv).as_posix()
+    # trajets = Path(trajets_csv).as_posix()
+    con.execute(f"""
+        INSERT INTO Dim_Localisation
+        SELECT LocationID,
+               COALESCE(Borough, 'Inconnu'),
+               COALESCE(Zone, 'Inconnu'),
+            COALESCE(service_zone, 'Inconnu')
+        FROM read_csv_auto('{zones}')
+        """)
 
-        # Récupération des localisations d'arrivée
-        dropoff = df[["DOLocationID"]].copy()
-        dropoff.columns = ["id_localisation"]
-
-        # Réunion des deux listes
-        localisation = pd.concat([pickup, dropoff])
-
-        # Suppression des doublons et valeurs manquantes
-        df_localisation_finale = (
-            localisation
-            .drop_duplicates()
-            .dropna()
-        )
-
-        # Vérification
-        print("Données qui vont être insérées :")
-        print(df_localisation_finale.head())
-
-        print(f"Nombre de lieux : {len(df_localisation_finale)}")
-
-        # Insertion
-        df_localisation_finale.to_sql(
-            "Dim_Localisation",
-            connexion,
-            if_exists="append",
-            index=False
-        )
-
-        connexion.commit()
-
-        print(
-            f"{len(df_localisation_finale)} lignes insérées "
-            "dans la table Dim_Localisation."
-        )
-
-    except (sqlite3.Error, KeyError, ValueError) as erreur:
-        print("Erreur lors de l'insertion des lieux :", erreur)
-        connexion.rollback()
-
-    finally:
-        connexion.close()
+    con.close()
+    
 
 # ============================================================
 # INSERTION DE LA TABLE FAITS_PREDICTION
