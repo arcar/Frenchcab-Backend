@@ -26,6 +26,7 @@ curseur = connexion.cursor()
 def initialiser_bdd():
     connexion = sqlite3.connect(DB_PATH)
     connexion.execute("DROP TABLE IF EXISTS Faits_Prediction")
+    connexion.execute("DROP TABLE IF EXISTS Dim_Distance")
     connexion.execute("DROP TABLE IF EXISTS Dim_Temps")
     connexion.execute("DROP TABLE IF EXISTS Dim_Localisation")
     try:
@@ -64,7 +65,26 @@ def initialiser_bdd():
                         zone_service   VARCHAR                            
                         );
                         """)
-        
+
+         # ------------------------------------------------
+        # TABLE DIM_DISTANCE
+        # ------------------------------------------------
+        curseur.execute("""
+                 CREATE TABLE IF NOT EXISTS Dim_Distance (
+                        id_localisation_d INTEGER,
+                        id_localisation_a INTEGER,
+                        distance_moyenne  REAL,
+                        nb_trajets        INTEGER,
+
+                        PRIMARY KEY (id_localisation_d, id_localisation_a),
+
+                        FOREIGN KEY (id_localisation_d)
+                            REFERENCES Dim_Localisation (id_localisation),
+
+                        FOREIGN KEY (id_localisation_a)
+                            REFERENCES Dim_Localisation (id_localisation)
+                        );
+                        """)
         # ------------------------------------------------
         # TABLE FAITS_PREDICTION
         # ------------------------------------------------ 
@@ -193,7 +213,63 @@ def inserer_dim_localisation(db_path=DB_PATH, zones_csv=ZONES_CSV, trajets_csv=N
 
     con.close()
     
+# ============================================================
+# INSERTION DE LA TABLE DIM_DISTANCE
+# ============================================================
+def inserer_dim_distance(df):
+    connexion = sqlite3.connect(DB_PATH)
 
+    try:
+        # Tous les ID présents dans Dim_Localisation
+        ids = pd.read_sql_query(
+            "SELECT id_localisation FROM Dim_Localisation",
+            connexion
+        )["id_localisation"]
+
+        # Toutes les combinaisons départ / arrivée
+        couples = pd.MultiIndex.from_product(
+            [ids, ids],
+            names=["id_localisation_d", "id_localisation_a"]
+        ).to_frame(index=False)
+
+        # Distance moyenne réelle par couple, à partir des trajets
+        moyennes = (
+            df.groupby(["PULocationID", "DOLocationID"])["trip_distance"]
+              .agg(distance_moyenne="mean", nb_trajets="count")
+              .reset_index()
+              .rename(columns={
+                  "PULocationID": "id_localisation_d",
+                  "DOLocationID": "id_localisation_a",
+              })
+        )
+
+        # Jointure : les couples sans trajet restent à NaN
+        df_distance = couples.merge(
+            moyennes,
+            on=["id_localisation_d", "id_localisation_a"],
+            how="left"
+        )
+        df_distance["nb_trajets"] = df_distance["nb_trajets"].fillna(0).astype(int)
+
+        print("Données qui vont être insérées :")
+        print(df_distance.head())
+        print(f"{len(df_distance)} couples, "
+              f"{df_distance['distance_moyenne'].isna().sum()} sans trajet (NaN)")
+
+        df_distance.to_sql(
+            "Dim_Distance",
+            connexion,
+            if_exists="append",
+            index=False
+        )
+        connexion.commit()
+
+    except (sqlite3.Error, KeyError) as erreur:
+        print("Erreur lors de l'insertion de Dim_Distance :", erreur)
+        connexion.rollback()
+
+    finally:
+        connexion.close()
 # ============================================================
 # INSERTION DE LA TABLE FAITS_PREDICTION
 # ============================================================
@@ -333,4 +409,5 @@ if __name__ == "__main__":
     initialiser_bdd()
     inserer_dim_temps(df)
     inserer_dim_localisation()
+    inserer_dim_distance(df)
     inserer_faits_prediction()
