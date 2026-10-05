@@ -4,3 +4,4 @@ uvicorn
 scikit-learn
 joblib
 requests
+duckdb
