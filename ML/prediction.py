@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import joblib
 import pandas as pd
@@ -9,7 +10,8 @@ import pandas as pd
 
 DOSSIER_SCRIPT = Path(__file__).resolve().parent
 
-MODEL_PATH = DOSSIER_SCRIPT / "modele_temps_trajet.pkl"
+# MODEL_PATH permet de placer le modèle ailleurs (ex : volume Docker sur la VM)
+MODEL_PATH = Path(os.getenv("MODEL_PATH", DOSSIER_SCRIPT / "modele_temps_trajet.pkl"))
 
 
 # ============================================================

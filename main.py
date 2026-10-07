@@ -1,3 +1,4 @@
+import os
 import threading
 from contextlib import contextmanager
 from datetime import datetime
@@ -12,7 +13,11 @@ app = FastAPI()
 router = APIRouter()
 
 # Base relationnelle créée par ETL/Load.py (fonction creer_db_relationnelle)
-DB_RELATIONNELLE = Path(__file__).resolve().parent / "ETL" / "frenchcab_relationnelle.db"
+# DB_RELATIONNELLE permet de la placer ailleurs (ex : volume Docker sur la VM)
+DB_RELATIONNELLE = Path(os.getenv(
+    "DB_RELATIONNELLE",
+    Path(__file__).resolve().parent / "ETL" / "frenchcab_relationnelle.db",
+))
 
 # DuckDB n'accepte pas deux connexions de configurations differentes
 # (lecture seule / ecriture) en meme temps dans un processus : on serialise.
