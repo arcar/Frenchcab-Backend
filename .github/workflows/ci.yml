@@ -1,11 +1,14 @@
-# .github/workflows/docker.yml
+# .github/workflows/ci.yml
 
-name: Build Docker image
+name: CI
 
+# - push sur une branche perso : tests, puis merge automatique dans dev si OK
+# - dev : tests, puis build et push de l'image Docker
 on:
   push:
-    branches:
-      - dev
+    branches-ignore:
+      - main
+  workflow_dispatch:
 
 jobs:
   test:
@@ -28,7 +31,52 @@ jobs:
       - name: Lancer les tests
         run: pytest -v
 
+  merge-dev:
+    # Merge automatique de la branche perso dans dev, si les tests passent
+    if: github.event_name == 'push' && github.ref != 'refs/heads/dev'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    concurrency:
+      group: merge-dev
+      cancel-in-progress: false
+
+    steps:
+      - name: Récupérer dev
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - name: Merger la branche dans dev
+        id: merge
+        env:
+          BRANCHE: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          if git merge-base --is-ancestor "$SHA" HEAD; then
+            echo "Déjà présent dans dev, rien à merger"
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git merge --no-ff "$SHA" -m "<chores> merge auto de $BRANCHE dans dev"
+          git push origin dev
+          echo "merged=true" >> "$GITHUB_OUTPUT"
+
+      # Un push fait avec GITHUB_TOKEN ne relance pas la CI : on la déclenche sur dev
+      - name: Relancer la CI sur dev
+        if: steps.merge.outputs.merged == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --repo "${{ github.repository }}" --ref dev
+
   build:
+    # Build et push de l'image uniquement sur dev, si les tests passent
+    if: github.ref == 'refs/heads/dev' && github.event_name != 'pull_request'
     needs: test
     runs-on: ubuntu-latest
 
