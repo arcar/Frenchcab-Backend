@@ -49,7 +49,7 @@ Le dossier `Frenchcab-compose` contient les autres dossiers du projet (`Frenchca
 1. Cloner les autres repos dans le dossier `Frenchcab-compose` :
 - `Frenchcab-Frontend` :
 ```powershell
-https://github.com/arcar/Frenchcab-Backend.git
+https://github.com/arcar/Frenchcab-Backend.gitgit add 
 ```
 Demander l'accès en tant que membre à `mmorkos-cyber`, puis lire le `contributing`.
 
@@ -57,8 +57,8 @@ Demander l'accès en tant que membre à `mmorkos-cyber`, puis lire le `contribut
 Dans ce repo ont été ajouté des secrets (`DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`), afin de pouvoir lancer le `workflows`.
 
 3. `.github`
-Dans `Frenchcab-Backend` a été créé un dossier `.github` qui contient le `workflows` avec un fichier `ci.yml`.
-Le fichier `ci.yml` se déclenche sur un `push` sur la branche `dev` : il lance les tests (`pytest`), puis `docker build` et `docker push`.
+Dans `Frenchcab-Frontend` a été créer un dossier `github` qui contient le `workflows` avec un fichier `ci.yml`.
+Actuellement le fichier `ci.yml`, sert uniquement à lancer `docker build` et `docker push`, le Frontend n'ayant à ce stade pas de test.
 
 ### 2. VM
 
@@ -73,9 +73,9 @@ Dans la VM a été crée un fichier `deploy.sh` qui avec `cron` se déclenche à
 
 ### 3. Docker
 
-Le Backend a été dockerisé.
+Le Frontend a été dockerisé.
 
-Les images docker sont sur **Dockerhub**, et s'active via le fichier `ci.yml` dans ce repo, il suffit donc de faire un `push` (ou de merger une pull request) sur la branche `dev`.
+Les images docker sont sur **Dockerhub**, et s'active via le fichier `ci.yml` dans ce repo, il suffit donc de faire actuellement un `push` sur la branche `staging`. A terme il semble plus judicieux de modifier `ci.yml` pour qu'il s'active sur un `push` sur la branche `dev`.
 
 ## Traitement des données
 
