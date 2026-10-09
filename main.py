@@ -229,3 +229,26 @@ def lister_courses():
         }
         for l in lignes
     ]
+@app.patch("/courses/{course_id}/annulation")
+def annuler_course(course_id: int):
+    """Annule une course planifiee (statut -> 'annulee')."""
+    with ouvrir_db_relationnelle(ecriture=True) as con:
+        preparer_table_reservation(con)
+        ligne = con.execute(
+            "SELECT statut FROM reservation WHERE ReservationID = ?", [course_id]
+        ).fetchone()
+
+        if ligne is None:
+            raise HTTPException(status_code=404, detail="Course introuvable.")
+        if ligne[0] != "planifiee":
+            raise HTTPException(
+                status_code=409,
+                detail="Seule une course planifiée peut être annulée.",
+            )
+
+        con.execute(
+            "UPDATE reservation SET statut = 'annulee' WHERE ReservationID = ?",
+            [course_id],
+        )
+
+    return {"id": course_id, "statut": "annulee"}
