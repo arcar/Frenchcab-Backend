@@ -148,11 +148,11 @@ print(resultats_df.round(2))
 # MODÈLE FINAL
 # ============================================================
 
-print("\nEntraînement du modèle final...")
+#print("\nEntraînement du modèle final...")
 
 modele_final = rf_model
 
-modele_final.fit(X,y)
+#modele_final.fit(X,y)
 
 # ============================================================
 # SAUVEGARDE
