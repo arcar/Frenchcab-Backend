@@ -8,6 +8,7 @@ name: CI
 #     branches-ignore:
 #       - main
 #   workflow_dispatch:
+# TEST VERSION
 on:
   push:
     branches:
@@ -77,7 +78,7 @@ jobs:
           import hashlib
           from pathlib import Path
 
-          pkl = Path("/opt/frenchcab/data/ml/modele_temps_trajet.pkl")
+          pkl = Path("/home/groupe2/frenchcab/ml/modele_temps_trajet.pkl")
           if not pkl.is_file():
               raise SystemExit(f"ECHEC : modèle introuvable : {pkl}")
 
