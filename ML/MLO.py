@@ -14,7 +14,6 @@ from sklearn.metrics import mean_absolute_error
 
 
 
-
 DOSSIER_SCRIPT = Path(__file__).resolve().parent
 
 
@@ -109,10 +108,6 @@ def evaluer(modele, X, y):
     y_pred = modele.predict(X)
     mae = round(float(mean_absolute_error(y, y_pred)), 2)
     return mae, y_pred
-
-
-
-
 
 
 
