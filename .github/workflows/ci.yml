@@ -1,0 +1,143 @@
+# .github/workflows/ci.yml
+name: CI
+
+# - push sur une branche perso : tests + contrôle du modèle, puis merge automatique dans dev si OK
+# - dev : tests + contrôle du modèle, puis build et push de l'image Docker
+on:
+  push:
+    branches-ignore:
+      - main
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Installer les dépendances
+        run: pip install -r requirements-dev.txt
+
+      - name: Lancer les tests
+        run: pytest -v
+
+      # ---------------- mlOps : contrôle qualité du modèle ----------------
+
+
+      #1 Vérifier la version  ← compare le .pkl avec le resultats.json COMMITÉ
+
+      - name: Vérifier que le modèle livré est la dernière version évaluée
+        run: |
+          python - <<'EOF'
+          import hashlib, json, sys
+          from pathlib import Path
+
+          pkl = Path("/opt/frenchcab/data/ml/modele_temps_trajet.pkl")
+          evaluation = json.loads(Path("ml/resultats.json").read_text(encoding="utf-8"))
+
+          version_pkl = hashlib.sha256(pkl.read_bytes()).hexdigest()[:12]
+          version_evaluee = evaluation["modele"]["version"]
+          print("Version du modèle livré           :", version_pkl)
+          print("Version du dernier resultats.json :", version_evaluee)
+
+          if version_pkl != version_evaluee:
+              sys.exit("ECHEC : le modèle a changé mais resultats.json n'a pas été mis à jour (lancez ml/MLO.py)")
+          print("OK : le modèle livré est bien la dernière version évaluée")
+          EOF
+  #2. Télécharger les données d'évaluation (TLC avril 2026)
+      - name: Télécharger les données d'évaluation (TLC avril 2026)
+        run: |
+          mkdir -p raw_data
+          curl -fsSL -o raw_data/yellow_tripdata_2026-04.parquet \
+            https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2026-04.parquet
+
+      - name: Contrôle qualité du modèle (MAE <= 6 min)
+        run: python ml/MLO.py --seuil 6
+
+      - name: Publier le résultat de l'évaluation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-modele
+          path: ml/resultats.json
+
+
+  merge-dev:
+    # Merge automatique de la branche perso dans dev, si les tests passent
+    if: github.event_name == 'push' && github.ref != 'refs/heads/dev'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    concurrency:
+      group: merge-dev
+      cancel-in-progress: false
+
+    steps:
+      - name: Récupérer dev
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - name: Merger la branche dans dev
+        id: merge
+        env:
+          BRANCHE: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          if git merge-base --is-ancestor "$SHA" HEAD; then
+            echo "Déjà présent dans dev, rien à merger"
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git merge --no-ff "$SHA" -m "<chores> merge auto de $BRANCHE dans dev"
+          git push origin dev
+          echo "merged=true" >> "$GITHUB_OUTPUT"
+
+      # Un push fait avec GITHUB_TOKEN ne relance pas la CI : on la déclenche sur dev
+      - name: Relancer la CI sur dev
+        if: steps.merge.outputs.merged == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --repo "${{ github.repository }}" --ref dev
+
+  build:
+    # Build et push de l'image uniquement sur dev, si les tests passent
+    if: github.ref == 'refs/heads/dev' && github.event_name != 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Se connecter à Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build de l'image
+        run: |
+          docker build \
+            -t ${{ vars.DOCKERHUB_USERNAME }}/frenchcab-backend:${{ github.sha }} \
+            -t ${{ vars.DOCKERHUB_USERNAME }}/frenchcab-backend:latest \
+            .
+
+      - name: Push vers Docker Hub
+        run: |
+          docker push ${{ vars.DOCKERHUB_USERNAME }}/frenchcab-backend:${{ github.sha }}
+          docker push ${{ vars.DOCKERHUB_USERNAME }}/frenchcab-backend:latest
