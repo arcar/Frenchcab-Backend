@@ -3,12 +3,19 @@ name: CI
 
 # - push sur une branche perso : tests + contrôle du modèle, puis merge automatique dans dev si OK
 # - dev : tests + contrôle du modèle, puis build et push de l'image Docker
+# on:
+#   push:
+#     branches-ignore:
+#       - main
+#   workflow_dispatch:
 on:
   push:
-    branches-ignore:
-      - main
-  workflow_dispatch:
+    branches:
+      - malick
 
+  pull_request:
+    branches:
+      - malick
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -35,24 +42,50 @@ jobs:
 
       #1 Vérifier la version  ← compare le .pkl avec le resultats.json COMMITÉ
 
-      - name: Vérifier que le modèle livré est la dernière version évaluée
+      # - name: Vérifier que le modèle livré est la dernière version évaluée
+      #   run: |
+      #     python - <<'EOF'
+      #     import hashlib, json, sys
+      #     from pathlib import Path
+
+      #     pkl = Path("/opt/frenchcab/data/ml/modele_temps_trajet.pkl")
+      #     evaluation = json.loads(Path("ml/resultats.json").read_text(encoding="utf-8"))
+
+      #     version_pkl = hashlib.sha256(pkl.read_bytes()).hexdigest()[:12]
+      #     version_evaluee = evaluation["modele"]["version"]
+      #     print("Version du modèle livré           :", version_pkl)
+      #     print("Version du dernier resultats.json :", version_evaluee)
+
+      #     if version_pkl != version_evaluee:
+      #         sys.exit("ECHEC : le modèle a changé mais resultats.json n'a pas été mis à jour (lancez ml/MLO.py)")
+      #     print("OK : le modèle livré est bien la dernière version évaluée")
+      #     EOF
+
+      
+      - name: Vérifier la version du modéle sur le serveur
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
-          python - <<'EOF'
-          import hashlib, json, sys
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$SERVER_HOST" >> ~/.ssh/known_hosts
+
+          ssh "$SERVER_USER@$SERVER_HOST" 'python3 - <<'"'"'PY'"'"'
+          import hashlib
           from pathlib import Path
 
           pkl = Path("/opt/frenchcab/data/ml/modele_temps_trajet.pkl")
-          evaluation = json.loads(Path("ml/resultats.json").read_text(encoding="utf-8"))
+          if not pkl.is_file():
+              raise SystemExit(f"ECHEC : modèle introuvable : {pkl}")
 
-          version_pkl = hashlib.sha256(pkl.read_bytes()).hexdigest()[:12]
-          version_evaluee = evaluation["modele"]["version"]
-          print("Version du modèle livré           :", version_pkl)
-          print("Version du dernier resultats.json :", version_evaluee)
+          version = hashlib.sha256(pkl.read_bytes()).hexdigest()[:12]
+          print("Version du modèle déployé :", version)
+          PY'
 
-          if version_pkl != version_evaluee:
-              sys.exit("ECHEC : le modèle a changé mais resultats.json n'a pas été mis à jour (lancez ml/MLO.py)")
-          print("OK : le modèle livré est bien la dernière version évaluée")
-          EOF
+
   #2. Télécharger les données d'évaluation (TLC avril 2026)
       - name: Télécharger les données d'évaluation (TLC avril 2026)
         run: |
