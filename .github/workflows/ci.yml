@@ -50,7 +50,7 @@ jobs:
           print("Version du dernier resultats.json :", version_evaluee)
 
           if version_pkl != version_evaluee:
-              sys.exit("ECHEC : le modèle a changé mais resultats.json n'a pas été mis à jour (lancez ml/mlO.py)")
+              sys.exit("ECHEC : le modèle a changé mais resultats.json n'a pas été mis à jour (lancez ml/MLO.py)")
           print("OK : le modèle livré est bien la dernière version évaluée")
           EOF
   #2. Télécharger les données d'évaluation (TLC avril 2026)
@@ -61,7 +61,7 @@ jobs:
             https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2026-04.parquet
 
       - name: Contrôle qualité du modèle (MAE <= 6 min)
-        run: python ml/mlO.py --seuil 6
+        run: python ml/MLO.py --seuil 6
 
       - name: Publier le résultat de l'évaluation
         if: always()
