@@ -18,7 +18,9 @@ from preparation import (preparer_dataframe_ml, charger_donnees_analytiques)
 # ============================================================
 
 DOSSIER_SCRIPT = Path(__file__).resolve().parent
-MODEL_PATH = DOSSIER_SCRIPT / "modele_temps_trajet.pkl"
+#MODEL_PATH = DOSSIER_SCRIPT / "modele_temps_trajet.pkl"
+MODEL_PATH = DOSSIER_SCRIPT
+
 
 LIMIT_DATA = 1000_000
 
@@ -73,7 +75,7 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_
 
 
 # ============================================================
-# PRÉPROCESSEUR
+# PRÉPROCESSEUR RANDOM FOREST
 # ============================================================
 
 preprocessor = ColumnTransformer([
@@ -81,12 +83,36 @@ preprocessor = ColumnTransformer([
     ("num", "passthrough", num_cols)
 ])
 
+
+# Préprocesseur  régression linéaire
+preprocessor_lin = ColumnTransformer([
+    ("cat", OneHotEncoder(handle_unknown="ignore"), cat_cols),
+    ("num", "passthrough", num_cols),
+])
+
+# lin_model = Pipeline([
+#     ("prep", preprocessor_lin),
+#     ("reg", LinearRegression()),
+# ])
+
+# # Entraîner le pipeline complet
+# lin_model.fit(X_train, y_train)
+
+# # Sauvegarder le pipeline complet et cohérent
+# joblib.dump(
+#     lin_model,
+#     MODEL_PATH / "modele_temps_trajet_lin_model.pkl"
+# )
+
+
+
+
 # ============================================================
 # RÉGRESSION LINÉAIRE
 # ============================================================
 
 lin_model = Pipeline([
-    ("prep", preprocessor),
+    ("prep", preprocessor_lin),
     ("reg", LinearRegression())
 ])
 
@@ -148,16 +174,19 @@ print(resultats_df.round(2))
 # MODÈLE FINAL
 # ============================================================
 
-print("\nEntraînement du modèle final...")
+#print("\nEntraînement du modèle final...")
 
 modele_final = rf_model
 
-modele_final.fit(X,y)
+#modele_final.fit(X,y)
 
 # ============================================================
-# SAUVEGARDE
+# SAUVEGARDE DES MODELES 
 # ============================================================
 
-joblib.dump(modele_final, MODEL_PATH)
+joblib.dump(modele_final, MODEL_PATH / "modele_temps_trajet.pkl")
+joblib.dump(lin_model, MODEL_PATH / "modele_temps_trajet_lin_model.pkl")
 
-print(f"\nModèle sauvegardé dans : {MODEL_PATH}")
+
+
+print(f"\nModèles sauvegardé dans : {MODEL_PATH}")
