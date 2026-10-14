@@ -37,7 +37,7 @@ jobs:
         run: |
           sudo apt-get install -y -qq ${{ secrets.VM_PASSWORD }}
           sshpass -e scp -o StrictHostKeyChecking=accept-new \
-            "${{ vars.VM_USER }}@${{ vars.VM_HOST }}:/opt/frenchcab/data/ml/modele_temps_trajet.pkl" \
+            "${{ vars.VM_USER }}@${{ vars.VM_HOST }}:/home/groupe2/frenchcab/ml/modele_temps_trajet.pkl" \
             ml/modele_temps_trajet.pkl
           ls -l ml/modele_temps_trajet.pkl
 
