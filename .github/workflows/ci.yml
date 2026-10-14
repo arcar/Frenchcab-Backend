@@ -41,7 +41,7 @@ jobs:
           import hashlib, json, sys
           from pathlib import Path
 
-          pkl = Path("ML/modele_temps_trajet.pkl")
+          pkl = Path("ml/modele_temps_trajet.pkl")
           evaluation = json.loads(Path("ML/resultats.json").read_text(encoding="utf-8"))
 
           version_pkl = hashlib.sha256(pkl.read_bytes()).hexdigest()[:12]
