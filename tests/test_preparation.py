@@ -3,7 +3,7 @@ import sqlite3
 import pandas as pd
 import pytest
 
-from ML import preparation
+from ml import preparation
 
 
 COLONNES_ML = [
