@@ -83,7 +83,7 @@ if __name__ == "__main__":
     df = charger_donnees_analytiques()
 
     # ---------------------------------
-    # Préparation des données ML
+    # Préparation des données ml
     # ---------------------------------
     df_ml = preparer_dataframe_ml(df)
 

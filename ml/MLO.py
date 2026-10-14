@@ -143,7 +143,7 @@ def main():
     texte = json.dumps(resultat, indent=2, ensure_ascii=False)
     print(texte)
 
-    # Toujours enregistré dans ML/, quel que soit le dossier d'où on lance le script
+    # Toujours enregistré dans ml/, quel que soit le dossier d'où on lance le script
     (DOSSIER_SCRIPT / "resultats.json").write_text(texte, encoding="utf-8")
 
     # code de sortie  0  succès, 1 = échec -> exploitable par la CI

@@ -3,10 +3,10 @@ import sqlite3
 import pandas as pd
 import pytest
 
-from ML import preparation
+from ml import preparation
 
 
-COLONNES_ML = [
+COLONNES_ml = [
     "id_temps",
     "heure",
     "minute",
@@ -37,7 +37,7 @@ def faux_dataframe():
 def test_preparer_dataframe_ml_garde_les_bonnes_colonnes():
     df_ml = preparation.preparer_dataframe_ml(faux_dataframe())
 
-    assert list(df_ml.columns) == COLONNES_ML
+    assert list(df_ml.columns) == COLONNES_ml
     assert "mois" not in df_ml.columns
 
 

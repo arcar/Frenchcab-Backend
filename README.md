@@ -151,7 +151,7 @@ id_localisation_a
 ### Préparation des données
 Les données sont préparées dans le fichier :
 ```
-ML/preparation.py
+ml/preparation.py
 ```
 ### Modèles testés
 Deux modèles sont comparés :
@@ -160,9 +160,9 @@ LinearRegression
 RandomForestRegressor
 ```
 
-## Entrainement ML
+## Entrainement ml
 
-Lancer le fichier `entrainement.py` pour créer le modèle du ML `modele_temps_trajet.pkl"`, qui sera dans le dossier `ML`.
+Lancer le fichier `entrainement.py` pour créer le modèle du ml `modele_temps_trajet.pkl"`, qui sera dans le dossier `ml`.
 
 ## Prédiction
 
