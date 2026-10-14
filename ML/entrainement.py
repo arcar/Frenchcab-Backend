@@ -10,6 +10,7 @@ from sklearn.preprocessing import OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import (mean_absolute_error, mean_absolute_percentage_error)
+from sklearn.base import clone
 
 from preparation import (preparer_dataframe_ml, charger_donnees_analytiques)
 
@@ -70,8 +71,24 @@ X["est_weekend"] = (X["est_weekend"].astype(int))
 # ============================================================
 # TRAIN / TEST
 # ============================================================
+# 80
+X_train, X_teste, y_train, y_teste = train_test_split(
+    X,
+    y,
+    test_size=0.20,
+    random_state=42
+)
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+X_val, X_test, y_val, y_test = train_test_split(
+    X_teste,
+    y_teste,
+    test_size=0.50,
+    random_state=42
+)
+
+print(f"Train : {len(X_train)} lignes")
+print(f"Validation : {len(X_val)} lignes")
+print(f"Test : {len(X_test)} lignes")
 
 
 # ============================================================
@@ -138,54 +155,106 @@ rf_model = Pipeline([
 # ============================================================
 
 models = {
-    "Linear Regression": lin_model,
-    "Random Forest": rf_model
+    "Linear Regression": Pipeline([
+        ("prep", clone(preprocessor)),
+        ("reg", LinearRegression())
+    ]),
+
+    "Random Forest": Pipeline([
+        ("prep", clone(preprocessor)),
+        ("reg", RandomForestRegressor(
+            n_estimators=50,
+            max_depth=15,
+            random_state=42,
+            n_jobs=-1
+        ))
+    ])
 }
+
+
+# ============================================================
+# CALCUL DES ERREURS
+# ============================================================
+
+def calculer_metriques(y_true, y_pred):
+    erreurs = abs(y_true.to_numpy() - y_pred)
+
+    return {
+        "MAE (minutes)": mean_absolute_error(y_true, y_pred),
+        "Erreur min (minutes)": erreurs.min(),
+        "Erreur max (minutes)": erreurs.max()
+    }
+
+
 
 results = {}
 
-
 for name, model in models.items():
-
     print(f"\nEntraînement de {name}...")
 
     model.fit(X_train, y_train)
 
-    y_pred = model.predict(X_test)
+    train_pred = model.predict(X_train)
+    val_pred = model.predict(X_val)
 
     results[name] = {
-        "MAE (min)": mean_absolute_error(y_test, y_pred),
-
-        "MAPE (%)": mean_absolute_percentage_error(y_test, y_pred) * 100
+        "MAE train (minutes)": mean_absolute_error(
+            y_train, train_pred
+        ),
+        **calculer_metriques(y_val, val_pred)
     }
 
 
 # ============================================================
-# RÉSULTATS
+# RÉSULTATS DE VALIDATION — EN DEHORS DE LA BOUCLE
 # ============================================================
 
 resultats_df = pd.DataFrame(results).T
 
-print("\nRésultats :")
+print("\nRésultats sur la validation :")
 print(resultats_df.round(2))
 
 
 # ============================================================
-# MODÈLE FINAL
+# CHOIX DU MODÈLE
+# ============================================================
+
+meilleur_nom = resultats_df["MAE (minutes)"].idxmin()
+
+print(f"\nModèle choisi : {meilleur_nom}")
+
+
+# ============================================================
+# ENTRAÎNEMENT FINAL SUR TRAIN + VALIDATION
 # ============================================================
 
 #print("\nEntraînement du modèle final...")
 
-modele_final = rf_model
+X_train_val = pd.concat([X_train, X_val])
+y_train_val = pd.concat([y_train, y_val])
 
-#modele_final.fit(X,y)
+modele_final = clone(models[meilleur_nom])
+modele_final.fit(X_train_val, y_train_val)
 
 # ============================================================
-# SAUVEGARDE DES MODELES 
+# ÉVALUATION FINALE SUR LE TEST
 # ============================================================
 
-joblib.dump(modele_final, MODEL_PATH / "modele_temps_trajet.pkl")
-joblib.dump(lin_model, MODEL_PATH / "modele_temps_trajet_lin_model.pkl")
+y_pred = modele_final.predict(X_test)
+
+resultats_test = {
+    **calculer_metriques(y_test, y_pred),
+    "MAPE (%)": mean_absolute_percentage_error(
+        y_test, y_pred
+    ) * 100
+}
+
+print("\nRésultats sur le test :")
+print(pd.Series(resultats_test).round(2))
+
+
+# SAUVEGARDE
+joblib.dump(modele_final, MODEL_PATH)
 
 
 
