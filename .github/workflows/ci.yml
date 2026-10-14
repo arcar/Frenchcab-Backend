@@ -2,6 +2,8 @@ name: CI
 
 on:
   push:
+    branches:
+      - dev
     branches-ignore:
       - main
   workflow_dispatch:
@@ -34,7 +36,7 @@ jobs:
         env:
           SSHPASS: ${{ secrets.VM_PASSWORD }}
         run: |
-          sudo apt-get install -y -qq sshpass
+          sudo apt-get install -y -qq ${{ secrets.VM_PASSWORD }}
           sshpass -e scp -o StrictHostKeyChecking=accept-new \
             "${{ vars.VM_USER }}@${{ vars.VM_HOST }}:/opt/frenchcab/data/ml/modele_temps_trajet.pkl" \
             ml/modele_temps_trajet.pkl
