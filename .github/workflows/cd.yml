@@ -1,4 +1,4 @@
-name: Continuous Deployment - ML Model
+name: Continuous Deployment - ml Model
 
 # Déclencheur : s'exécute lors d'un push sur la branche principale
 on:
