@@ -63,28 +63,42 @@ jobs:
       #     EOF
 
       
-      - name: Vérifier la version du modéle sur le serveur
+    
+      - name: Vérifier la version du modèle sur le serveur
         env:
-          SERVER_HOST: ${{ secrets.SERVER_HOST }}
-          SERVER_USER: ${{ secrets.SERVER_USER }}
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          VM_HOST: ${{ vars.VM_HOST }}
+          VM_USER: ${{ vars.VM_USER }}
+          VM_PASSWORD: ${{ secrets.VM_PASSWORD }}
         run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H "$SERVER_HOST" >> ~/.ssh/known_hosts
+          set -e
 
-          ssh "$SERVER_USER@$SERVER_HOST" 'python3 - <<'"'"'PY'"'"'
+          if [ -z "$VM_HOST" ] || [ -z "$VM_USER" ] || [ -z "$VM_PASSWORD" ]; then
+            echo "ECHEC : VM_HOST, VM_USER ou VM_PASSWORD est manquant."
+            exit 1
+          fi
+
+          sudo apt-get update
+          sudo apt-get install -y sshpass
+
+          export SSHPASS="$VM_PASSWORD"
+
+          sshpass -e ssh \
+            -o StrictHostKeyChecking=accept-new \
+            "$VM_USER@$VM_HOST" \
+            'python3 - <<'"'"'PY'"'"'
           import hashlib
+          import sys
           from pathlib import Path
 
           pkl = Path("/home/groupe2/frenchcab/ml/modele_temps_trajet.pkl")
+
           if not pkl.is_file():
-              raise SystemExit(f"ECHEC : modèle introuvable : {pkl}")
+              sys.exit(f"ECHEC : modèle introuvable : {pkl}")
 
           version = hashlib.sha256(pkl.read_bytes()).hexdigest()[:12]
           print("Version du modèle déployé :", version)
           PY'
+
 
 
   #2. Télécharger les données d'évaluation (TLC avril 2026)
