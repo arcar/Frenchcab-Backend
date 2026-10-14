@@ -111,7 +111,7 @@ def calculer_duree(demande):
         distance = estimer_distance(con, demande.zone_depart, demande.zone_arrivee)
 
     # Import ici : le modele (.pkl) n'est charge qu'a la premiere prediction
-    from ML.prediction import predire_temps_trajet
+    from ml.prediction import predire_temps_trajet
 
     try:
         duree = predire_temps_trajet(
@@ -127,7 +127,7 @@ def calculer_duree(demande):
     except FileNotFoundError:
         raise HTTPException(
             status_code=503,
-            detail="Modele absent : lancez ML/entrainement.py.",
+            detail="Modele absent : lancez ml/entrainement.py.",
         )
     return round(duree, 1), round(distance, 2), moment
 

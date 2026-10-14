@@ -61,14 +61,14 @@ jobs:
             https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2026-04.parquet
 
       - name: Contrôle qualité du modèle (MAE <= 6 min)
-        run: python ML/MLO.py --seuil 6
+        run: python ml/MLO.py --seuil 6
 
       - name: Publier le résultat de l'évaluation
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: evaluation-modele
-          path: ML/resultats.json
+          path: ml/resultats.json
 
 
   merge-dev:
