@@ -33,7 +33,7 @@ jobs:
       #  on copie le modèle de la VM (/opt/frenchcab/data/ml) dans ml/ par SSH
       - name: Récupérer le modèle depuis la VM
         env:
-          SSHPASS: ${{ secrets.VM_PASSWORD }}
+          SSHPASS: ${{ secrets.SSHPASS }}
         run: |
           sudo apt-get install -y -qq ${{ secrets.VM_PASSWORD }}
           sshpass -e scp -o StrictHostKeyChecking=accept-new \
