@@ -1,0 +1,144 @@
+
+name: Continuous Deployment - Backend MLOps
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - dev
+
+permissions:
+  contents: read
+
+# Empêcher deux déploiements simultanés sur la VM
+concurrency:
+  group: frenchcab-backend-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Premier essai : CI lancée manuellement sur dev
+    if: >-
+      github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.event == 'workflow_dispatch'
+      && github.event.workflow_run.head_branch == 'dev'
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      # ==================================================
+      # 1. DEPLOIEMENT DE L'IMAGE VALIDEE PAR LA CI
+      # ==================================================
+
+      - name: Déployer et exécuter le MLOps sur la VM
+        uses: appleboy/ssh-action@v1
+        env:
+          BACKEND_IMAGE: ${{ vars.DOCKERHUB_USERNAME }}/frenchcab-backend:${{ github.event.workflow_run.head_sha }}
+        with:
+          host: ${{ vars.VM_HOST }}
+          username: ${{ vars.VM_USER }}
+          password: ${{ secrets.VM_PASSWORD }}
+          envs: BACKEND_IMAGE
+          command_timeout: 110m
+          script: |
+            set -eu
+            cd /home/groupe2/frenchcab
+
+            echo "=== DEPLOIEMENT DOCKER ==="
+            echo "Image backend : $BACKEND_IMAGE"
+
+            bash ./deploy.sh
+
+            # Vérifier la présence des scripts MLOps
+            docker compose exec -T backend sh -c '
+              test -f /app/ml/preparation.py &&
+              test -f /app/ml/entrainement.py &&
+              test -f /app/ml/MLO.py &&
+              test -f /app/ml/publier_modele.py
+            '
+
+            # ==================================================
+            # 2. DONNEES D'EVALUATION
+            # ==================================================
+
+            echo "=== DONNEES MLOPS ==="
+
+            mkdir -p raw_data
+
+            if [ ! -s raw_data/yellow_tripdata_2026-04.parquet ]; then
+              curl -fL --retry 3 \
+                -o raw_data/yellow_tripdata_2026-04.parquet.tmp \
+                https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2026-04.parquet
+
+              mv raw_data/yellow_tripdata_2026-04.parquet.tmp \
+                 raw_data/yellow_tripdata_2026-04.parquet
+            fi
+
+            docker compose exec -T backend \
+              test -s /raw_data/yellow_tripdata_2026-04.parquet
+
+            # ==================================================
+            # 3. PREPARATION ET ENTRAINEMENT
+            # ==================================================
+
+            echo "=== ENTRAINEMENT DU CANDIDAT ==="
+
+            # Éviter de réutiliser un ancien candidat
+            docker compose exec -T backend rm -f \
+              /ml/modele_candidat.pkl \
+              /ml/resultats_candidat.json
+
+            # entrainement.py appelle les fonctions de preparation.py
+            docker compose exec -T \
+              -e MODEL_OUTPUT_PATH=/ml/modele_candidat.pkl \
+              backend python /app/ml/entrainement.py
+
+            docker compose exec -T backend \
+              test -s /ml/modele_candidat.pkl
+
+            # ==================================================
+            # 4. EVALUATION MLOPS
+            # ==================================================
+
+            echo "=== EVALUATION DU CANDIDAT ==="
+
+            docker compose exec -T \
+              -e MODEL_EVALUATION_PATH=/ml/modele_candidat.pkl \
+              -e RESULTATS_PATH=/ml/resultats_candidat.json \
+              -e EVALUATION_DATA_PATH=/raw_data/yellow_tripdata_2026-04.parquet \
+              backend python /app/ml/MLO.py --seuil 6
+
+            docker compose exec -T backend \
+              test -s /ml/resultats_candidat.json
+
+            # ==================================================
+            # 5. PUBLICATION DU MODELE VALIDE
+            # ==================================================
+
+            echo "=== PUBLICATION DU MODELE ==="
+
+            docker compose exec -T backend \
+              python /app/ml/publier_modele.py
+
+            # ==================================================
+            # 6. RECHARGEMENT DU BACKEND
+            # ==================================================
+
+            echo "=== REDEMARRAGE DU BACKEND ==="
+
+            docker compose restart backend
+
+            # Vérification HTTP après redémarrage
+            curl -fsS \
+              --retry 10 \
+              --retry-connrefused \
+              --retry-delay 2 \
+              --max-time 5 \
+              http://127.0.0.1:3001/test
+
+            echo ""
+            echo "=== DEPLOIEMENT ET MLOPS TERMINES ==="
