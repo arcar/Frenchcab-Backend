@@ -96,8 +96,11 @@ notamment celles pouvant servir à l'analyse ou à la prédiction.
 
 Le traitement des données est organisé en trois étapes :
 
-1. `Extract.py`
-   - charge les données sources au format Parquet ;
+1. Créer un fichier `raw_data` dans `Frenchcab-Backend`, pour acceuillir le fichier parquet.
+Télécharger le dossier parquet ici : https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2026-01.parquet
+
+2. `Extract.py`
+   - charge les fichier `taxi_zone_lookup.csv` dans le `dossier raw_data` ;
 
 2. `Transform.py`
    - convertit les types ;
@@ -111,11 +114,16 @@ Le traitement des données est organisé en trois étapes :
    - crée les tables analytiques ;
    - insère les données transformées.
 
-Pour exécuter l'ETL, lancer :
+Pour exécuter tout l'**ETL** (extract, transform, load), lancer :
 
 ```bash
 python ETL/Load.py
 ```
+
+Ce qui va créer deux bdd :
+- `frenchcab_relationnelle.db` = base de donnée relationnelle
+- `frenchcab.db` = base de donnée décisionnelle
+
 ## Machine Learning
 
 ### Objectif
@@ -149,7 +157,7 @@ id_localisation_d
 id_localisation_a
 ```
 ### Préparation des données
-Les données sont préparées dans le fichier :
+Les données sont préparées dans le fichier, lancer le fichier :
 ```
 ml/preparation.py
 ```
