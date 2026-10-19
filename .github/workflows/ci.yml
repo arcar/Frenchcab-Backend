@@ -1,13 +1,11 @@
-# .github/workflows/ci.yml
 name: CI
 
-# - push sur une branche perso : tests + contrôle du modèle, puis merge automatique dans dev si OK
-# - dev : tests + contrôle du modèle, puis build et push de l'image Docker
 on:
   push:
-    branches-ignore:
-      - main
+    branches:
+      - dev
   workflow_dispatch:
+
 
 jobs:
   test:
@@ -32,16 +30,35 @@ jobs:
 
       # ---------------- mlOps : contrôle qualité du modèle ----------------
 
+<<<<<<< HEAD
 
       #1 Vérifier la version  ← compare le .pkl avec le resultats.json COMMITÉ
 
+=======
+      #  on copie le modèle de la VM (/opt/frenchcab/data/ml) dans ml/ par SSH
+      - name: Récupérer le modèle depuis la VM
+        env:
+          SSHPASS: ${{ secrets.VM_PASSWORD }}
+        run: |
+          sudo apt-get install -y -qq ${{ secrets.VM_PASSWORD }}
+          sshpass -e scp -o StrictHostKeyChecking=accept-new \
+            "${{ vars.VM_USER }}@${{ vars.VM_HOST }}:/home/groupe2/frenchcab/ml/modele_temps_trajet.pkl" \
+            ml/modele_temps_trajet.pkl
+          ls -l ml/modele_temps_trajet.pkl
+
+      #1 Vérifier la version  ← compare le .pkl de la VM avec le resultats.json COMMITÉ
+>>>>>>> 0447166c786d737033ec2cc25f0d32fb8d11a8e8
       - name: Vérifier que le modèle livré est la dernière version évaluée
         run: |
           python - <<'EOF'
           import hashlib, json, sys
           from pathlib import Path
 
+<<<<<<< HEAD
           pkl = Path("/opt/frenchcab/data/ml/modele_temps_trajet.pkl")
+=======
+          pkl = Path("ml/modele_temps_trajet.pkl")
+>>>>>>> 0447166c786d737033ec2cc25f0d32fb8d11a8e8
           evaluation = json.loads(Path("ml/resultats.json").read_text(encoding="utf-8"))
 
           version_pkl = hashlib.sha256(pkl.read_bytes()).hexdigest()[:12]
@@ -53,13 +70,22 @@ jobs:
               sys.exit("ECHEC : le modèle a changé mais resultats.json n'a pas été mis à jour (lancez ml/MLO.py)")
           print("OK : le modèle livré est bien la dernière version évaluée")
           EOF
+<<<<<<< HEAD
   #2. Télécharger les données d'évaluation (TLC avril 2026)
+=======
+
+      #2 Télécharger les données d'évaluation (TLC avril 2026)
+>>>>>>> 0447166c786d737033ec2cc25f0d32fb8d11a8e8
       - name: Télécharger les données d'évaluation (TLC avril 2026)
         run: |
           mkdir -p raw_data
           curl -fsSL -o raw_data/yellow_tripdata_2026-04.parquet \
             https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2026-04.parquet
 
+<<<<<<< HEAD
+=======
+      #3 Évaluer le modèle (MLO.py lit ml/modele_temps_trajet.pkl par défaut)
+>>>>>>> 0447166c786d737033ec2cc25f0d32fb8d11a8e8
       - name: Contrôle qualité du modèle (MAE <= 6 min)
         run: python ml/MLO.py --seuil 6
 
@@ -140,4 +166,8 @@ jobs:
       - name: Push vers Docker Hub
         run: |
           docker push ${{ vars.DOCKERHUB_USERNAME }}/frenchcab-backend:${{ github.sha }}
+<<<<<<< HEAD
           docker push ${{ vars.DOCKERHUB_USERNAME }}/frenchcab-backend:latest
+=======
+          docker push ${{ vars.DOCKERHUB_USERNAME }}/frenchcab-backend:latest
+>>>>>>> 0447166c786d737033ec2cc25f0d32fb8d11a8e8

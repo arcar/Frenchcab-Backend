@@ -1,0 +1,14 @@
+/raw_data/**
+
+__pycache__
+
+gateway/node_modules
+node_modules/
+gateway/.env
+.venv/
+.__pycache__/
+.pytest_cache/
+
+# Base de données
+*.db
+*.pkl

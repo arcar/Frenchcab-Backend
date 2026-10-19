@@ -1,0 +1,7 @@
+pandas
+fastapi
+uvicorn
+scikit-learn
+joblib
+requests
+duckdb
