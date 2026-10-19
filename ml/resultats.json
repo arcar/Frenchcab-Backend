@@ -1,0 +1,37 @@
+{
+  "modele": {
+    "fichier": "modele_temps_trajet.pkl",
+    "version": "8307b7233084",
+    "date_modification_fichier": "2026-10-14T09:16:10",
+    "algorithme": "RandomForestRegressor"
+  },
+  "donnees_test": "yellow_tripdata_2026-04.parquet",
+  "nb_trajets": 100000,
+  "duree_moyenne_reelle_minutes": 18.03,
+  "duree_moyenne_predite_minutes": 16.55,
+  "exemples": [
+    {
+      "duree_reelle_minutes": 11.8,
+      "duree_predite_minutes": 11.9
+    },
+    {
+      "duree_reelle_minutes": 16.7,
+      "duree_predite_minutes": 19.1
+    },
+    {
+      "duree_reelle_minutes": 12.6,
+      "duree_predite_minutes": 14.8
+    },
+    {
+      "duree_reelle_minutes": 7.0,
+      "duree_predite_minutes": 7.2
+    },
+    {
+      "duree_reelle_minutes": 12.8,
+      "duree_predite_minutes": 13.6
+    }
+  ],
+  "mae_minutes": 4.63,
+  "seuil_mae_minutes": 6.0,
+  "statut": "OK"
+}

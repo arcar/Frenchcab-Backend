@@ -1,0 +1,46 @@
+name: Continuous Deployment - ml Model
+
+# Déclencheur : s'exécute lors d'un push sur la branche principale
+on:
+  push:
+    branches:
+      - main
+
+# Permissions nécessaires pour l'authentification cloud ou les packages
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Récupération du code source du dépôt
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      # 2. Configuration de l'environnement Python (si besoin de scripts de build)
+      - name: Configuration de Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      # 3. Authentification auprès de Docker Hub (ou autre registre ex: AWS ECR)
+      - name: Connexion à Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 5. Déploiement effectif (Exemple : notification ou appel webhook / serveur SSH)
+      - name: Déploiement sur le serveur de production
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ vars.VM_HOST }}
+          username: ${{ vars.VM_USER }}
+          password: ${{ secrets.VM_PASSWORD }}
+          script: |
+            docker compose pull ${{ vars.DOCKERHUB_USERNAME }}/Frenchcab-Backend:latest
+            docker compose down Frenchcab-Backend || true
+            docker run -d --name Frenchcab-Backend -p 80:80 ${{ vars.DOCKERHUB_USERNAME }}/Frenchcab-Backend:latest
