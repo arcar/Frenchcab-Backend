@@ -1,6 +1,5 @@
 # Frenchcab-Backend
 
-
 ## Prérequis
 Pour ce projet, les outils suivants doivent être installés :
 
@@ -30,12 +29,12 @@ Frenchcab-Backend/
 ├── ...
 ```
 
-
 ## Contexte 
 Vous intégrez une équipe chargée de développer, sur cinq semaines, une application exploitant les données réelles des taxis de New York publiées par la NYC Taxi & Limousine Commission (TLC).
 
 ## Structuration du projet
 Projet avec **4 repos** `Github`
+
 ```
 Frenchcab-compose
 -> Frenchcab-Backend + Frenchcab-Frontend + Frenchcab-Gateway
@@ -116,6 +115,7 @@ Pour exécuter l'ETL, lancer :
 ```bash
 python ETL/Load.py
 ```
+
 ## Machine Learning
 
 ### Objectif
@@ -168,4 +168,13 @@ Lancer le fichier `entrainement.py` pour créer le modèle du ml `modele_temps_t
 
 Lancer le fichier `prediction.py` pour avoir une prédiction.
 
+## Etat d'avancement
 
+Le modèle est sur la VM ainsi que les données et bases
+dans le dossier frenchcab :
+
+* db/
+* ml/
+* raw_data
+
+TOUTEFOIS un problème de persistance des volumes ne permet pas encore d'enregistrer le modèle depuis l'application en production.
