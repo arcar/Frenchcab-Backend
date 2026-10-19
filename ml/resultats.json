@@ -2,7 +2,7 @@
   "modele": {
     "fichier": "modele_temps_trajet.pkl",
     "version": "8307b7233084",
-    "date_modification_fichier": "2026-10-19T10:39:46",
+    "date_modification_fichier": "2026-10-19T10:33:18",
     "algorithme": "RandomForestRegressor"
   },
   "donnees_test": "yellow_tripdata_2026-04.parquet",

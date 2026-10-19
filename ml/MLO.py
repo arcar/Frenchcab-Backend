@@ -13,14 +13,12 @@ from sklearn.metrics import mean_absolute_error
 
 
 
-
-
 DOSSIER_SCRIPT = Path(__file__).resolve().parent
 
 
 MODEL_PATH = Path(os.getenv("MODEL_PATH", DOSSIER_SCRIPT / "modele_temps_trajet.pkl"))
 
-# connées de test  février 2026 (le modèle entraîné janvier 2026)
+# données de test  février 2026 (le modèle entraîné janvier 2026)
 DONNEES_PAR_DEFAUT = DOSSIER_SCRIPT.parent / "raw_data" / "yellow_tripdata_2026-04.parquet"
 
 # Seuil de qualité au-delà de cette MAE (en minutes)
@@ -40,8 +38,9 @@ FEATURES = [
     "est_weekend",
 ]
 
-
-
+# ============================================================
+# 1. IDENTIFICATION DU MODELE
+# ============================================================
 
 def identifier_modele(chemin_modele, modele):
     # empreinte SHA-256 du fichier , si le .pkl change, la version change
@@ -58,8 +57,9 @@ def identifier_modele(chemin_modele, modele):
         "algorithme": type(modele.named_steps["reg"]).__name__,
     }
 
-
-
+# ============================================================
+# 2. PREPARER UN NOUVEAU JEU DE DONNEE TEST
+# ============================================================
 
 def preparer_donnees_test(chemin_donnees, nb_lignes=NB_LIGNES):
     colonnes = [
@@ -104,6 +104,9 @@ def preparer_donnees_test(chemin_donnees, nb_lignes=NB_LIGNES):
 
     return X, y
 
+# ============================================================
+# 3. EVALUER LE MODELE SUR CE NOUVEAU JEU DE DONNEE
+# ============================================================
 
 def evaluer(modele, X, y):
     y_pred = modele.predict(X)
@@ -112,9 +115,9 @@ def evaluer(modele, X, y):
 
 
 
-
-
-
+# ============================================================
+# 4. PIPELINE DU FICHIER
+# ============================================================
 
 def main():
     parser = argparse.ArgumentParser(description="évalue le modèle de durée de trajet")

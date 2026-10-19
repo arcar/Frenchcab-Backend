@@ -1,6 +1,5 @@
 # Frenchcab-Backend
 
-
 ## Prérequis
 Pour ce projet, les outils suivants doivent être installés :
 
@@ -30,12 +29,12 @@ Frenchcab-Backend/
 ├── ...
 ```
 
-
 ## Contexte 
 Vous intégrez une équipe chargée de développer, sur cinq semaines, une application exploitant les données réelles des taxis de New York publiées par la NYC Taxi & Limousine Commission (TLC).
 
 ## Structuration du projet
 Projet avec **4 repos** `Github`
+
 ```
 Frenchcab-compose
 -> Frenchcab-Backend + Frenchcab-Frontend + Frenchcab-Gateway
@@ -96,8 +95,11 @@ notamment celles pouvant servir à l'analyse ou à la prédiction.
 
 Le traitement des données est organisé en trois étapes :
 
-1. `Extract.py`
-   - charge les données sources au format Parquet ;
+1. Créer un fichier `raw_data` dans `Frenchcab-Backend`, pour acceuillir le fichier parquet.
+Télécharger le dossier parquet ici : https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2026-01.parquet
+
+2. `Extract.py`
+   - charge les fichier `taxi_zone_lookup.csv` dans le `dossier raw_data` ;
 
 2. `Transform.py`
    - convertit les types ;
@@ -111,11 +113,19 @@ Le traitement des données est organisé en trois étapes :
    - crée les tables analytiques ;
    - insère les données transformées.
 
-Pour exécuter l'ETL, lancer :
+Pour exécuter tout l'**ETL** (extract, transform, load), lancer :
 
 ```bash
 python ETL/Load.py
 ```
+
+<<<<<<< HEAD
+=======
+Ce qui va créer deux bdd :
+- `frenchcab_relationnelle.db` = base de donnée relationnelle
+- `frenchcab.db` = base de donnée décisionnelle
+
+>>>>>>> lola
 ## Machine Learning
 
 ### Objectif
@@ -149,7 +159,7 @@ id_localisation_d
 id_localisation_a
 ```
 ### Préparation des données
-Les données sont préparées dans le fichier :
+Les données sont préparées dans le fichier, lancer le fichier :
 ```
 ml/preparation.py
 ```
@@ -166,6 +176,30 @@ Lancer le fichier `entrainement.py` pour créer le modèle du ml `modele_temps_t
 
 ## Prédiction
 
-Lancer le fichier `prediction.py` pour avoir une prédiction.
+Lancer le fichier `prediction.py` pour avoir une prédiction, vous devez obtenir dans le log une prédiction : *Temps de trajet estimé : 17.75 minutes*
 
 
+
+## MLOPS
+Commencer par télécharger le nouveaux parquet qui correspond à la pèriode d'Avril 2026 : https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2026-04.parquet
+
+Puis lancer le fichier MLO.py :
+```bash
+python ml/MLO.py
+```
+Le fichier MLO va :
+- charger les données des taxis du mois d'avril 2026
+- evaluation du modèle
+  - retester le modèle **MAE** 
+  - définir un seuil de qualité en audessus duquel le ML est considéré comme non efficace
+  - crée un rapport `resultats.json`
+
+## Etat d'avancement
+Le modèle est sur la VM ainsi que les données et bases
+dans le dossier frenchcab :
+
+* db/
+* ml/
+* raw_data
+
+TOUTEFOIS un problème de persistance des volumes ne permet pas encore d'enregistrer le modèle depuis l'application en production.
