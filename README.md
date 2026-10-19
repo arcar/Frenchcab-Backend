@@ -119,13 +119,10 @@ Pour exécuter tout l'**ETL** (extract, transform, load), lancer :
 python ETL/Load.py
 ```
 
-<<<<<<< HEAD
-=======
 Ce qui va créer deux bdd :
 - `frenchcab_relationnelle.db` = base de donnée relationnelle
 - `frenchcab.db` = base de donnée décisionnelle
 
->>>>>>> lola
 ## Machine Learning
 
 ### Objectif
@@ -179,7 +176,6 @@ Lancer le fichier `entrainement.py` pour créer le modèle du ml `modele_temps_t
 Lancer le fichier `prediction.py` pour avoir une prédiction, vous devez obtenir dans le log une prédiction : *Temps de trajet estimé : 17.75 minutes*
 
 
-
 ## MLOPS
 Commencer par télécharger le nouveaux parquet qui correspond à la pèriode d'Avril 2026 : https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2026-04.parquet
 
@@ -194,7 +190,7 @@ Le fichier MLO va :
   - définir un seuil de qualité en audessus duquel le ML est considéré comme non efficace
   - crée un rapport `resultats.json`
 
-## Etat d'avancement
+## Etat d'avancement S3
 Le modèle est sur la VM ainsi que les données et bases
 dans le dossier frenchcab :
 

@@ -2,6 +2,7 @@ from pathlib import Path
 
 import joblib
 import pandas as pd
+import os
 
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
@@ -19,7 +20,7 @@ from preparation import (preparer_dataframe_ml, charger_donnees_analytiques)
 # ============================================================
 
 DOSSIER_SCRIPT = Path(__file__).resolve().parent
-MODEL_PATH = DOSSIER_SCRIPT / "modele_temps_trajet.pkl"
+MODEL_PATH = Path(os.getenv("MODEL_OUTPUT_PATH", "/ml/modele_candidat.pkl"))
 
 LIMIT_DATA = 1000_000
 

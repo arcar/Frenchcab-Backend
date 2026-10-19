@@ -1,6 +1,5 @@
-from Extract import parquet_df, pd, year, month
+from Extract import parquet_df, pd, year, month, dossier_data
 
-OUTPUT_PATH = "Frenchcab-Backend/raw_data/yellow_tripdata_propre.csv"
 
 
 colonnes_date = ["tpep_pickup_datetime", "tpep_dropoff_datetime"]
@@ -76,7 +75,7 @@ try:
         return df.reset_index(drop=True)
 
     df = transform(parquet_df, year, month)
-    df.to_csv(OUTPUT_PATH, index=False)
+    df.to_csv(dossier_data, index=False)
     
 except FileNotFoundError:
     print("File not found:", parquet_df)
