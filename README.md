@@ -174,6 +174,20 @@ Lancer le fichier `entrainement.py` pour créer le modèle du ml `modele_temps_t
 
 ## Prédiction
 
-Lancer le fichier `prediction.py` pour avoir une prédiction.
+Lancer le fichier `prediction.py` pour avoir une prédiction, vous devez obtenir dans le log une prédiction : *Temps de trajet estimé : 17.75 minutes*
 
 
+## MLOPS
+
+Commencer par télécharger le nouveaux parquet qui correspond à la pèriode d'Avril 2026 : https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2026-04.parquet
+
+Puis lancer le fichier MLO.py :
+```bash
+python ml/MLO.py
+```
+Le fichier MLO va :
+- charger les données des taxis du mois d'avril 2026
+- evaluation du modèle
+  - retester le modèle **MAE** 
+  - définir un seuil de qualité en audessus duquel le ML est considéré comme non efficace
+  - crée un rapport `resultats.json`
