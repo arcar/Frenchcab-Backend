@@ -1,11 +1,13 @@
+# .github/workflows/ci.yml
 name: CI
 
+# - push sur une branche perso : tests + contrôle du modèle, puis merge automatique dans dev si OK
+# - dev : tests + contrôle du modèle, puis build et push de l'image Docker
 on:
   push:
-    branches:
-      - dev
+    branches-ignore:
+      - main
   workflow_dispatch:
-
 
 jobs:
   test:

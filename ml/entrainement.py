@@ -202,7 +202,7 @@ print(f"\nModèle choisi : {meilleur_nom}")
 # ENTRAÎNEMENT FINAL SUR TRAIN + VALIDATION
 # ============================================================
 
-#print("\nEntraînement du modèle final...")
+print("\nEntraînement du modèle final...")
 
 X_train_val = pd.concat([X_train, X_val])
 y_train_val = pd.concat([y_train, y_val])
