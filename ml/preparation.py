@@ -1,8 +1,5 @@
 import pandas as pd
 import sqlite3
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 from pathlib import Path
 
 # ---------------------------------
@@ -118,6 +115,9 @@ if __name__ == "__main__":
     # ---------------------------------
     # Heatmap de corrélation
     # ---------------------------------
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
     plt.figure(figsize=(12, 8))
 
     sns.heatmap(
