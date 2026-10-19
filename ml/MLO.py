@@ -16,10 +16,10 @@ from sklearn.metrics import mean_absolute_error
 DOSSIER_SCRIPT = Path(__file__).resolve().parent
 
 
-MODEL_PATH = Path(os.getenv("MODEL_PATH", DOSSIER_SCRIPT / "modele_temps_trajet.pkl"))
+MODEL_PATH = Path(os.getenv("MODEL_EVALUATION_PATH", "/ml/modele_candidat.pkl"))
 
 # données de test  février 2026 (le modèle entraîné janvier 2026)
-DONNEES_PAR_DEFAUT = DOSSIER_SCRIPT.parent / "raw_data" / "yellow_tripdata_2026-04.parquet"
+DONNEES_PAR_DEFAUT = Path(os.getenv("EVALUATION_DATA_PATH", "/raw_data/yellow_tripdata_2026-04.parquet"))
 
 # Seuil de qualité au-delà de cette MAE (en minutes)
 SEUIL_MAE_PAR_DEFAUT = 6.0

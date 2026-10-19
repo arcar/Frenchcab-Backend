@@ -1,15 +1,27 @@
-# .github/workflows/ci.yml
+
 name: CI
 
-# - push sur une branche perso : tests + contrôle du modèle, puis merge automatique dans dev si OK
-# - dev : tests + contrôle du modèle, puis build et push de l'image Docker
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch'
+      && format('CI manuelle sur {0}', github.ref_name)
+      || format('CI sur {0}', github.ref_name) }}
+
 on:
   push:
     branches-ignore:
       - main
+
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
+
+  # =====================================================
+  # 1. TESTS DU BACKEND
+  # =====================================================
+
   test:
     runs-on: ubuntu-latest
 
@@ -30,66 +42,24 @@ jobs:
       - name: Lancer les tests
         run: pytest -v
 
-      # ---------------- mlOps : contrôle qualité du modèle ----------------
-
-      #  on copie le modèle de la VM (/opt/frenchcab/data/ml) dans ml/ par SSH
-      - name: Récupérer le modèle depuis la VM
-        env:
-          SSHPASS: ${{ secrets.SSHPASS }}
-        run: |
-          echo "${{ secrets.VM_PASSWORD }}" | sudo -S apt-get install -y -qq
-          sshpass -e scp -o StrictHostKeyChecking=accept-new \
-            "${{ vars.VM_USER }}@${{ vars.VM_HOST }}:/home/groupe2/frenchcab/ml/modele_temps_trajet.pkl" \
-            ml/modele_temps_trajet.pkl
-          ls -l ml/modele_temps_trajet.pkl
-
-      #1 Vérifier la version  ← compare le .pkl de la VM avec le resultats.json COMMITÉ
-      - name: Vérifier que le modèle livré est la dernière version évaluée
-        run: |
-          python - <<'EOF'
-          import hashlib, json, sys
-          from pathlib import Path
-
-          pkl = Path("ml/modele_temps_trajet.pkl")
-          evaluation = json.loads(Path("ml/resultats.json").read_text(encoding="utf-8"))
-
-          version_pkl = hashlib.sha256(pkl.read_bytes()).hexdigest()[:12]
-          version_evaluee = evaluation["modele"]["version"]
-          print("Version du modèle livré           :", version_pkl)
-          print("Version du dernier resultats.json :", version_evaluee)
-
-          if version_pkl != version_evaluee:
-              sys.exit("ECHEC : le modèle a changé mais resultats.json n'a pas été mis à jour (lancez ml/MLO.py)")
-          print("OK : le modèle livré est bien la dernière version évaluée")
-          EOF
-
-      #2 Télécharger les données d'évaluation (TLC avril 2026)
-      - name: Télécharger les données d'évaluation (TLC avril 2026)
-        run: |
-          mkdir -p raw_data
-          curl -fsSL -o raw_data/yellow_tripdata_2026-04.parquet \
-            https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2026-04.parquet
-
-      #3 Évaluer le modèle (MLO.py lit ml/modele_temps_trajet.pkl par défaut)
-      - name: Contrôle qualité du modèle (MAE <= 6 min)
-        run: python ml/MLO.py --seuil 6
-
-      - name: Publier le résultat de l'évaluation
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: evaluation-modele
-          path: ml/resultats.json
-
+  # =====================================================
+  # 2. FUSION AUTOMATIQUE DANS DEV
+  # =====================================================
 
   merge-dev:
-    # Merge automatique de la branche perso dans dev, si les tests passent
-    if: github.event_name == 'push' && github.ref != 'refs/heads/dev'
+    name: Fusion automatique dans dev
+
+    if: >-
+      github.event_name == 'push'
+      && github.ref != 'refs/heads/dev'
+
     needs: test
     runs-on: ubuntu-latest
+
     permissions:
       contents: write
       actions: write
+
     concurrency:
       group: merge-dev
       cancel-in-progress: false
@@ -112,22 +82,37 @@ jobs:
             echo "merged=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git merge --no-ff "$SHA" -m "<chores> merge auto de $BRANCHE dans dev"
           git push origin dev
+
           echo "merged=true" >> "$GITHUB_OUTPUT"
 
-      # Un push fait avec GITHUB_TOKEN ne relance pas la CI : on la déclenche sur dev
+      # Un push avec GITHUB_TOKEN ne relance pas automatiquement
+      # les workflows. Nous déclenchons donc la CI sur dev.
       - name: Relancer la CI sur dev
         if: steps.merge.outputs.merged == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run ci.yml --repo "${{ github.repository }}" --ref dev
+        run: |
+          gh workflow run ci.yml \
+            --repo "${{ github.repository }}" \
+            --ref dev
+
+  # =====================================================
+  # 3. BUILD ET PUBLICATION DE L'IMAGE DOCKER
+  # =====================================================
 
   build:
-    # Build et push de l'image uniquement sur dev, si les tests passent
-    if: github.ref == 'refs/heads/dev' && github.event_name != 'pull_request'
+    name: Build et publication Docker Hub
+
+    if: >-
+      github.ref == 'refs/heads/dev'
+      && github.event_name != 'pull_request'
+
     needs: test
     runs-on: ubuntu-latest
 
@@ -141,14 +126,14 @@ jobs:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build de l'image
+      - name: Construire l'image backend
         run: |
           docker build \
             -t ${{ vars.DOCKERHUB_USERNAME }}/frenchcab-backend:${{ github.sha }} \
             -t ${{ vars.DOCKERHUB_USERNAME }}/frenchcab-backend:latest \
             .
 
-      - name: Push vers Docker Hub
+      - name: Publier l'image sur Docker Hub
         run: |
           docker push ${{ vars.DOCKERHUB_USERNAME }}/frenchcab-backend:${{ github.sha }}
           docker push ${{ vars.DOCKERHUB_USERNAME }}/frenchcab-backend:latest
