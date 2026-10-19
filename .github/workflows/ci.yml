@@ -37,7 +37,7 @@ jobs:
         env:
           SSHPASS: ${{ secrets.SSHPASS }}
         run: |
-          sudo apt-get install -y -qq ${{ secrets.VM_PASSWORD }}
+          echo "${{ secrets.VM_PASSWORD }}" | sudo -S apt-get install -y -qq
           sshpass -e scp -o StrictHostKeyChecking=accept-new \
             "${{ vars.VM_USER }}@${{ vars.VM_HOST }}:/home/groupe2/frenchcab/ml/modele_temps_trajet.pkl" \
             ml/modele_temps_trajet.pkl
