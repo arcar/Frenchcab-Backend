@@ -152,7 +152,10 @@ def main():
     print(texte)
 
     # Toujours enregistré dans ml/, quel que soit le dossier d'où on lance le script
-    (DOSSIER_SCRIPT / "resultats.json").write_text(texte, encoding="utf-8")
+    chemin_resultats = Path(os.getenv("RESULTATS_PATH", "/ml/resultats_candidat.json"))
+
+    chemin_resultats.parent.mkdir(parents=True, exist_ok=True)
+    chemin_resultats.write_text(texte, encoding="utf-8")
 
     # code de sortie  0  succès, 1 = échec -> exploitable par la CI
     if mae > args.seuil:
