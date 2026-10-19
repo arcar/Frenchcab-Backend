@@ -119,13 +119,10 @@ Pour exécuter tout l'**ETL** (extract, transform, load), lancer :
 python ETL/Load.py
 ```
 
-<<<<<<< HEAD
-=======
 Ce qui va créer deux bdd :
 - `frenchcab_relationnelle.db` = base de donnée relationnelle
 - `frenchcab.db` = base de donnée décisionnelle
 
->>>>>>> lola
 ## Machine Learning
 
 ### Objectif
