@@ -127,453 +127,189 @@ Ce qui va créer deux bdd :
 
 ### Objectif
 
-Le modèle de Machine Learning a pour objectif de **prédire la durée d'une course de taxi**.
+Le modèle de Machine Learning de Frenchcab prédit la durée d'une course de taxi en minutes. La variable cible, `trip_duration_min`, est calculée par différence entre `tpep_dropoff_datetime` et `tpep_pickup_datetime` lors de la préparation des données.
 
-La variable cible utilisée est :
+### Données et préparation
+Les données d'entraînement sont chargées depuis la base décisionnelle SQLite `ETL/frenchcab.db`, accessible dans le conteneur de la VM sous `/app/ETL/frenchcab.db` grâce au montage Docker existant. Le module `ml/preparation.py` prépare les données consommées par `ml/entrainement.py`.
 
-```text
-trip_duration_min
+Dans la version d'`entrainement.py` transmise par l'équipe, les variables d'entrée sont :
+- Catégorielles : nom_jour, id_localisation_d, id_localisation_a.
+- Numériques : trip_distance, heure, minute, est_weekend.
+
+*Point à vérifier avant la recette : ml/prediction.py transmet encore la variable mois, qui ne figure plus parmi les variables d'entraînement de cette version. Les variables utilisées à l'entraînement et à la prédiction doivent rester cohérentes.*
+
+
+### Entraînement et versions
+Le script `ml/entrainement.py` compare une **régression linéaire (LinearRegression)** et une **forêt aléatoire (RandomForestRegressor)**. Le modèle présentant la meilleure **MAE** sur le jeu de validation est réentraîné sur les ensembles d'entraînement et de validation, puis évalué sur un jeu de test interne.
+
+L'entraînement produit une nouvelle version sans remplacer les versions précédentes :
 ```
-Cette durée est calculée en amont dans le traitement des données à partir de :
+ml/
+├── modeles/
+│   ├── v1/
+│   │   ├── model.pkl
+│   │   ├── metadata.json
+│   │   └── evaluation_validation.csv
+│   └── v2/
+│       ├── model.pkl
+│       ├── metadata.json
+│       └── evaluation_validation.csv
+└── modele_temps_trajet.pkl
 ```
-tpep_pickup_datetime
-tpep_dropoff_datetime
-```
-### Chargement des données analytiques
-Les données utilisées pour l'entraînement sont chargées depuis la base SQLite :
-```
-ETL/frenchcab.db
-```
-### Les principales variables utilisées sont :
-```
-trip_distance
-heure
-minute
-mois
-est_weekend
-nom_jour
-id_localisation_d
-id_localisation_a
-```
-### Préparation des données
-Les données sont préparées dans le fichier, lancer le fichier :
-```
-ml/preparation.py
-```
-### Modèles testés
-Deux modèles sont comparés :
-```
-LinearRegression
-RandomForestRegressor
-```
+Chaque dossier `vN` contient le **modèle entraîné**, ses **métadonnées** et les **métriques de validation** des algorithmes comparés. 
 
-## Machine Learning
+**MODELS_DIR** définit le dossier de stockage des versions : `ml/modeles/` par défaut en local et `/ml/modeles/` dans le conteneur de la VM.
 
-### Objectif
-
-Le modèle de Machine Learning de Frenchcab a pour objectif de **prédire la durée d'une course de taxi**, exprimée en minutes.
-
-La variable cible est :
-
-```text
-trip_duration_min
-```
-
-Elle est calculée pendant le traitement des données à partir des dates de début et de fin de trajet :
-
-```text
-tpep_pickup_datetime
-tpep_dropoff_datetime
-```
-
-### Chargement des données analytiques
-
-Les données d'entraînement sont récupérées depuis la base décisionnelle SQLite :
-
-```text
-ETL/frenchcab.db
-```
-
-Sur la VM, cette base est conservée dans un volume Docker persistant et accessible au conteneur à l'emplacement `/app/ETL/frenchcab.db`.
-
-### Variables utilisées
-
-Parmi les principales variables utilisées pour la prédiction :
-
-- `trip_distance`
-- `heure`
-- `minute`
-- `mois`
-- `est_weekend`
-- `nom_jour`
-- `id_localisation_d`
-- `id_localisation_a`
-
-### Préparation des données
-
-La préparation est réalisée dans :
-
-```text
-ml/preparation.py
-```
-
-Ce module contient les fonctions permettant de charger et de préparer les données nécessaires à l'entraînement.
-
-Il est utilisé par `entrainement.py`.
-
-### Modèles testés
-
-Deux algorithmes sont comparés pendant l'entraînement :
-
-- `LinearRegression`
-- `RandomForestRegressor`
-
-Le modèle présentant les meilleures performances sur les données de validation est sélectionné.
-
-Lors de notre dernier entraînement, le modèle retenu était un **RandomForestRegressor**.
-
-### Entraînement
-
-L'entraînement est réalisé avec :
-
+Depuis la racine du backend en développement :
 ```bash
 python ml/entrainement.py
 ```
-
-Il utilise les données de la base décisionnelle pour construire un nouveau modèle.
-
-Le chemin de sauvegarde peut être configuré avec la variable d'environnement `MODEL_OUTPUT_PATH`.
-
-Dans le cadre du MLOps de la semaine 4, l'objectif est de **conserver plusieurs versions du modèle**, par exemple :
-
-```text
-modele_v1.pkl
-modele_v2.pkl
+Depuis la VM, dans le dossier contenant compose.yml :
+```bash
+docker compose exec -T -e MODELS_DIR=/ml/modeles backend python /app/ml/entrainement.py
 ```
-
-Chaque version doit pouvoir être évaluée et identifiée indépendamment.
-
-L'entraînement sur la VM sera déclenché manuellement via le workflow `mlops.yml`, une fois son intégration terminée.
+Attention : deux noms de versions différents ne garantissent pas deux modèles différents si les données, paramètres et graines aléatoires sont identiques. Vérifier les empreintes SHA-256 avant la démonstration V1/V2.
 
 ### Prédiction
+Le module `ml/prediction.py` charge le modèle de production indiqué par **MODEL_PATH** :
+- En local : ml/modele_temps_trajet.pkl par défaut.
+- Sur la VM : /ml/modele_temps_trajet.pkl lorsque MODEL_PATH est configuré dans Docker.
 
-Le module :
+Une fois importé, le modèle reste chargé en mémoire dans le processus Python. Après toute activation ou restauration, FastAPI doit donc être redémarré ou son processus rechargé pour utiliser effectivement la version choisie.
 
-```text
-ml/prediction.py
-```
+La route `GET /modele/version` a été ajoutée au code pour afficher la version mémorisée lors du chargement du modèle. Son fonctionnement avec les vrais modèles reste à vérifier sur la VM.
 
-charge le modèle indiqué par la variable d'environnement `MODEL_PATH`.
+## MLOps — Comparaison, activation et restauration des modèles
 
-Il utilise ensuite ce modèle pour calculer la durée estimée d'un trajet.
+### Objectif de la semaine 4
+Le système MLOps doit permettre de comparer deux versions compatibles sur les mêmes données, de contrôler leur qualité avec la MAE, de choisir explicitement une version à utiliser par Frenchcab, puis de revenir à la version précédente si nécessaire.
 
-Exemple de résultat :
-
-```text
-Temps de trajet estimé : 17.75 minutes
-```
-
-Le modèle est chargé en mémoire au démarrage du processus Python. Après une activation ou une restauration, le backend doit donc être redémarré pour utiliser le modèle sélectionné.
-
----
-
-## MLOps — Versionnement, comparaison et déploiement des modèles
-
-### Objectif
-
-Le pipeline MLOps de Frenchcab permet de gérer le cycle de vie des modèles de prédiction.
-
-Il doit permettre de :
-
-1. Entraîner de nouvelles versions du modèle.
-2. Conserver plusieurs modèles identifiables.
-3. Évaluer deux versions sur un même jeu de données.
-4. Comparer leurs performances avec la MAE.
-5. Vérifier le respect du seuil de qualité.
-6. Activer explicitement une version admissible.
-7. Restaurer la version précédente en cas de problème.
-8. Vérifier que l'API utilise réellement la version sélectionnée.
-
-L'objectif est de faire évoluer le modèle **sans dégrader le fonctionnement de l'application Frenchcab**.
+Il n'est pas nécessaire de réentraîner un modèle à chaque déploiement. Entraînement, évaluation, activation et retour arrière constituent des opérations distinctes.
 
 ### Architecture CI/CD et MLOps
+|Élément|	Responsabilité|	Déclenchement|
+|-------|-----------------|----------------|
+|ci.yml|	Tests et construction/publication de l'image Docker|	Selon la configuration de la CI|
+|cd.yml|	Connexion SSH à la VM, exécution de deploy.sh, vérification HTTP|	Après une CI réussie lancée manuellement sur dev, selon la condition actuelle|
+|deploy.sh (sur la VM)|	Récupération et démarrage des images avec Docker Compose|	Appelé par la CD|
+|mlops.yml|	Vérification, entraînement, comparaison, activation et rollback|	workflow_dispatch manuel|
 
-Le projet utilise GitHub Actions, Docker, Docker Hub et une VM Linux.
+La CD ne réentraîne plus automatiquement de modèle et n'active pas automatiquement de candidat. Le workflow MLOps est distinct et utilise la même VM.
 
-Trois workflows sont prévus :
+### Arborescence du stockage MLOps
+Les fichiers persistants de la VM se trouvent sur l'hôte dans `/home/groupe2/frenchcab/ml/`, monté dans le conteneur sous `/ml/`.
 
-| Workflow | Rôle | Déclenchement |
-|---|---|---|
-| `ci.yml` | Tests, validation du code et construction/publication de l'image Docker | Selon les événements configurés dans la CI |
-| `cd.yml` | Déploiement de l'application sur la VM | Après une CI réussie, déclenchée manuellement sur `dev` |
-| `mlops.yml` | Entraînement, comparaison, activation et restauration des modèles | Manuel (`workflow_dispatch`) |
-
-**La CD et le MLOps sont indépendants.**
-
-Un déploiement de l'application ne déclenche plus automatiquement l'entraînement d'un modèle ni sa mise en production.
-
-### Déploiement de l'application — `cd.yml`
-
-Le workflow `cd.yml` :
-
-1. Vérifie la réussite de la CI.
-2. Se connecte à la VM par SSH.
-3. Transmet la référence de l'image Docker validée.
-4. Exécute le script `deploy.sh` déjà présent sur la VM.
-5. Vérifie que l'API FastAPI répond correctement.
-
-Le script `deploy.sh` assure notamment la récupération et le démarrage des images avec Docker Compose.
-
-Les modèles sont conservés dans un volume persistant afin de ne pas être perdus lors des redéploiements.
-
-### Gestion des modèles — `mlops.yml`
-
-Un second workflow GitHub Actions est prévu pour les opérations MLOps.
-
-Il propose cinq actions :
-
-| Action | Fonction |
-|---|---|
-| `verifier` | Consulter les modèles présents sur la VM et identifier le fichier actif |
-| `entrainer` | Entraîner et sauvegarder une nouvelle version |
-| `comparer` | Évaluer deux versions sur les mêmes données |
-| `activer` | Sélectionner explicitement une version admissible |
-| `rollback` | Restaurer la version précédente |
-
-L'action `verifier` est prévue pour être non destructive.
-
-Les autres actions sont en cours d'intégration avec les scripts Python du projet.
-
-### Entraînement et versionnement
-
-Le script `ml/entrainement.py` entraîne les algorithmes et sélectionne le modèle retenu.
-
-Les versions doivent être conservées sous des noms distincts afin d'éviter d'écraser les modèles précédents.
-
-Exemple d'organisation prévue :
-
-```text
-ml/
-├── modele_v1.pkl
-├── modele_v2.pkl
-├── modele_temps_trajet.pkl
-└── version_active.json
 ```
-
-- `modele_v1.pkl` : première version conservée.
-- `modele_v2.pkl` : deuxième version à comparer.
-- `modele_temps_trajet.pkl` : modèle utilisé par l'application.
-- `version_active.json` : fichier d'état envisagé pour identifier la version active et la version précédente.
-
-Le format définitif des fichiers de versionnement sera confirmé après intégration des modifications d'entraînement.
-
-### Évaluation des modèles — `MLO.py`
-
-Le script :
-
-```text
-ml/MLO.py
-```
-
-permet d'évaluer un modèle sur un jeu de données indépendant de l'entraînement.
-
-Le jeu d'évaluation utilisé est celui des taxis de New York d'avril 2026 :
-
-[ Télécharger yellow_tripdata_2026-04.parquet ](https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2026-04.parquet)
-
-Exemple d'exécution locale, avec les chemins de données et de modèle configurés :
-
-```bash
-python ml/MLO.py --seuil 6
-```
-
-Le script calcule notamment :
-
-- Le nombre de trajets évalués.
-- La durée moyenne réelle.
-- La durée moyenne prédite.
-- La MAE exprimée en minutes.
-- Le statut de conformité au seuil.
-- L'empreinte identifiant le modèle évalué.
-
-**Le seuil de qualité est fixé à une MAE inférieure ou égale à 6 minutes.**
-
-Une version dépassant ce seuil ne doit pas pouvoir être activée par la procédure normale.
-
-### Comparaison de deux versions
-
-La semaine 4 introduit la comparaison de deux modèles existants.
-
-Les deux versions doivent être évaluées :
-
-- Sur exactement le même jeu de données.
-- Avec la même méthode de calcul de la MAE.
-- Avec le même seuil de qualité.
-
-Un rapport doit permettre de consulter leurs métriques, d'identifier les versions admissibles et de comparer leurs performances.
-
-Le format définitif du rapport de comparaison est en cours de développement.
-
-**Le modèle présentant la meilleure MAE n'est pas automatiquement activé.** L'activation reste une opération explicite.
-
-### Résultats de la dernière évaluation
-
-Lors du pipeline MLOps du 20 octobre 2026, un modèle Random Forest a été entraîné et évalué.
-
-| Indicateur | Résultat |
-|---|---|
-| Algorithme | `RandomForestRegressor` |
-| MAE sur le jeu de test interne | 3,78 minutes |
-| MAE sur les données d'avril 2026 | 4,63 minutes |
-| Seuil de qualité | 6 minutes |
-| Statut | Conforme |
-| Identifiant SHA-256 (12 caractères) | `886e25d2f40c` |
-
-Ces résultats concernent la version évaluée à cette date et ne constituent pas encore une comparaison entre V1 et V2.
-
-### Activation explicite d'une version
-
-Le script :
-
-```text
-ml/publier_modele.py
-```
-
-est adapté pour pouvoir sélectionner explicitement une version.
-
-Exemple de commande prévue :
-
-```bash
-python ml/publier_modele.py --version v2
-```
-
-Avant activation, le mécanisme vérifie :
-
-1. L'existence du fichier modèle.
-2. L'existence de son rapport d'évaluation.
-3. La correspondance entre le fichier et l'empreinte SHA-256 enregistrée.
-4. Le statut de validation.
-5. Le respect du seuil MAE ≤ 6 minutes.
-
-Une version non conforme doit être refusée.
-
-Après une activation réussie, le backend doit être rechargé pour utiliser le modèle sélectionné.
-
-Cette fonctionnalité est en cours de sécurisation et de test.
-
-### Retour arrière — Rollback
-
-Le script :
-
-```text
-ml/rollback_modele.py
-```
-
-est prévu pour restaurer le modèle précédemment utilisé.
-
-Le mécanisme doit :
-
-1. Identifier la version précédente.
-2. Vérifier la cohérence de son modèle et de ses métadonnées.
-3. Restaurer cette version.
-4. Redémarrer le backend.
-5. Vérifier que les prédictions et les informations exposées correspondent à la version restaurée.
-
-Le rollback doit fonctionner sans nouvel entraînement et sans modification manuelle du code source.
-
-Cette fonctionnalité est en cours de développement.
-
-### Stockage des modèles sur la VM
-
-Les fichiers ML sont conservés dans :
-
-```text
-/home/groupe2/frenchcab/ml/
-```
-
-Ce dossier est monté dans le conteneur Docker sous :
-
-```text
 /ml/
+├── modeles/
+│   ├── v1/
+│   │   ├── model.pkl
+│   │   ├── metadata.json
+│   │   └── evaluation_validation.csv
+│   ├── v2/
+│   │   ├── model.pkl
+│   │   ├── metadata.json
+│   │   └── evaluation_validation.csv
+│   ├── resultats_comparaison.json
+│   └── version_active.json
+└── modele_temps_trajet.pkl
 ```
+Les dossiers v1, v2, etc. contiennent les versions conservées. `modele_temps_trajet.pkl` est le fichier effectivement utilisé par FastAPI. `version_active.json` conserve les identifiants de la version active et de la précédente. Le rapport `resultats_comparaison.json` contient les métriques d'évaluation calculées par `MLO.py`.
 
-Les modèles et leurs rapports sont ainsi persistants entre deux redéploiements.
 
-Les fichiers historiques de la semaine 3 sont :
+### Évaluation et comparaison — ml/MLO.py
+Les versions sont évaluées à partir du jeu indépendant d'avril 2026 :
+```
+yellow_tripdata_2026-04.parquet
+```
+Le script de comparaison utilise un échantillon reproductible (graine aléatoire fixe) et calcule la MAE en minutes, avec un seuil de qualité fixé à 6 minutes.
 
-| Fichier | Rôle |
-|---|---|
-| `modele_candidat.pkl` | Modèle candidat de l'ancien pipeline |
-| `resultats_candidat.json` | Rapport du candidat |
-| `modele_temps_trajet.pkl` | Modèle actif |
-| `resultats.json` | Rapport du modèle publié |
+Exemple sur la VM, avec la version v2 comme candidate :
+```bash
+docker compose exec -T \
+  -e MODELS_DIR=/ml/modeles \
+  -e EVALUATION_DATA_PATH=/raw_data/yellow_tripdata_2026-04.parquet \
+  backend python /app/ml/MLO.py --candidate v2 --seuil 6
+```
+Le rapport est enregistré par défaut dans `/ml/modeles/resultats_comparaison.json`. Dans le format transmis, il contient notamment actuelle, candidate, leurs identifiants de version, leurs empreintes SHA-256 abrégées et leurs MAE, ainsi que le jeu évalué et le seuil.
 
-Les fichiers de versionnement V1/V2 seront ajoutés dans le cadre de la semaine 4.
+### Activation explicite — ml/publier_modele.py
+Après comparaison, l'activation d'une version est une décision distincte. Le script reçoit explicitement --version et vérifie :
+1. L'existence du fichier `modeles/vN/model.pkl`.
+2. La présence de cette version dans resultats_comparaison.json.
+3. La correspondance de l'empreinte SHA-256 avec le modèle évalué.
+4. Le respect du seuil MAE ≤ 6 minutes.
+5. La cohérence du modèle actuellement en production avec l'état enregistré.
 
-### Compatibilité développement et production
+Commande prévue en local, depuis la racine du backend :
+```bash
+python -m ml.publier_modele --version v2
+```
+Commande prévue dans le conteneur sur la VM :
+```bash
+docker compose exec -T \
+  -e ML_DIR=/ml \
+  -e MODELS_DIR=/ml/modeles \
+  backend python -m ml.publier_modele --version v2
+```
+Le script remplace le fichier actif et enregistre le couple version / precedente dans `modeles/version_active.json`. Un redémarrage du backend est ensuite nécessaire pour que les prédictions utilisent le nouveau modèle.
 
-Les scripts Python doivent pouvoir être exécutés :
+### Retour arrière — ml/rollback_modele.py
+Le rollback lit `modeles/version_active.json`, vérifie la version précédente et restaure son model.pkl en production. Il met ensuite à jour les identifiants actif/précédent. Il ne nécessite pas de nouvel entraînement.
 
-- En développement local, sur le PC des développeurs.
-- Dans le conteneur Docker de la VM.
+Commande prévue en local :
+```bash
+python -m ml.rollback_modele
+```
+Commande prévue sur la VM :
+```bash
+docker compose exec -T \
+  -e ML_DIR=/ml \
+  -e MODELS_DIR=/ml/modeles \
+  backend python -m ml.rollback_modele
+```
+Après un rollback, le workflow MLOps doit redémarrer le backend et vérifier la version exposée par `GET /modele/version`.
 
-Pour cela, les chemins sont configurables par variables d'environnement, avec des valeurs par défaut adaptées au développement local.
+### Vérification du modèle chargé par l'API
+La route ajoutée dans main.py est :
+```
+GET /modele/version
+```
+Elle renvoie la version mémorisée lors du chargement du modèle par `ml/prediction.py`. La correspondance avec le fichier actif est contrôlée à l'aide de son empreinte SHA-256 lorsque le fichier d'état est présent.
 
-Principales variables :
+La validation complète reste à réaliser sur la VM : activation de V2, redémarrage, vérification de l'API et d'une prédiction, puis rollback vers V1 et nouvelle vérification.
 
-| Variable | Utilisation |
-|---|---|
-| `ML_DIR` | Dossier de stockage des modèles |
-| `MODEL_PATH` | Modèle chargé pour les prédictions |
-| `MODEL_OUTPUT_PATH` | Destination d'un nouveau modèle entraîné |
-| `MODEL_EVALUATION_PATH` | Modèle à évaluer |
-| `EVALUATION_DATA_PATH` | Jeu de données d'évaluation |
-| `RESULTATS_PATH` | Destination du rapport d'évaluation |
+### Compatibilité développement / production
+Variable	Utilisation	Exemple sur la VM :
 
-Le même code Python doit pouvoir être utilisé en local et en production, sans modifier manuellement les chemins dans les scripts.
+- **ML_DIR**	Racine du stockage ML `/ml`
+- **MODELS_DIR**	Dossiers de versions et fichiers de suivi	`/ml/modeles`
+- **MODEL_PATH**	Modèle utilisé par FastAPI	`/ml/modele_temps_trajet.pkl`
+- **EVALUATION_DATA_PATH**	Données indépendantes d'évaluation	`/raw_data/yellow_tripdata_2026-04.parquet`
+- Les scripts de gestion des modèles utilisent des chemins fondés sur __file__ par défaut en local et des variables d'environnement dans Docker.
 
-### Tests et contrôle qualité
+Aucun fichier .env Python supplémentaire n'est obligatoire ; os.getenv() ne lit pas automatiquement un fichier .env.
 
-Les tests automatisés doivent vérifier :
+### Tests automatisés
+Les tests dédiés à la gestion des modèles se trouvent dans `tests/test_gestion_modele.py`. Ils ont été exécutés avec des fichiers fictifs isolés par **pytest** et **tmp_path**, sans vrai entraînement :
+|Test|	Résultat obtenu|
+|----|------------------|
+|Activation de V2 et conservation de V1|	Réussi|
+|Refus d'une MAE supérieure à 6 minutes|	Réussi|
+|Refus d'une empreinte SHA-256 incorrecte|	Réussi|
+|Rollback de V2 vers V1|	Réussi|
+|Refus d'un rollback sans version précédente|	Réussi|
+|Refus du rollback vers un modèle non conforme|	Réussi|
 
-- Le respect du seuil de qualité.
-- Le refus d'activation d'un modèle non admissible.
-- La correspondance entre le modèle et son rapport.
-- L'activation de la version demandée.
-- La restauration de la version précédente.
-- La cohérence des informations de version.
-- L'absence de régression sur les fonctionnalités existantes.
-
-Les tests seront intégrés à la CI avec les contrôles déjà présents.
+Exécution depuis la racine du backend :
+```bash
+python -m pytest tests/test_gestion_modele.py -v
+```
+**Bilan** : 6 tests réussis lors de l'exécution locale communiquée. Les tests valident la logique de fichiers et les refus attendus ; ils ne remplacent pas les tests d'intégration avec de vrais modèles, le redémarrage Docker ou le contrôle de la prédiction FastAPI.
 
 ### État d'avancement
+Développé et testé localement : scripts d'activation et de rollback, tests unitaires de gestion des versions, correction des imports du package ml.
 
-**Déjà opérationnel :**
-- Entraînement et sélection d'un Random Forest.
-- Évaluation avec calcul de la MAE.
-- Vérification du seuil de qualité.
-- Identification d'un modèle par SHA-256.
-- Stockage persistant sur la VM.
-- Déploiement Docker via CI/CD.
-- API FastAPI accessible après déploiement.
+Préparé ou en cours d'intégration : workflow manuel mlops.yml, identification de la version par FastAPI, format final du rapport de comparaison et comparaison explicite V1/V2.
 
-**En cours de développement pour la semaine 4 :**
-- Sauvegarde de plusieurs versions distinctes.
-- Comparaison V1/V2.
-- Déclenchement manuel des opérations MLOps.
-- Activation explicite d'une version.
-- Rollback sécurisé.
-- Synchronisation des métadonnées avec le modèle réellement chargé.
-- Tests automatisés des nouveaux mécanismes.
-
-Cette évolution permet de **séparer l'entraînement, l'évaluation et la mise en production**, afin de maîtriser les changements de modèle et de garantir la continuité de fonctionnement de Frenchcab.
-
-## Etat d'avancement S3
-Le modèle est sur la VM ainsi que les données et bases
-dans le dossier frenchcab :
-
-* db/
-* ml/
-* raw_data
-
-TOUTEFOIS un problème de persistance des volumes ne permet pas encore d'enregistrer le modèle depuis l'application en production.
+À valider avant la recette croisée : présence de deux modèles réellement distincts sur la VM, comparaison avec le rapport définitif, protection contre les opérations simultanées et interruptions brutales, activation V1 → V2 → V1 avec redémarrage et vérification des prédictions, puis vérification globale de CI/CD et HTTPS.
