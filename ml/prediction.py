@@ -1,7 +1,8 @@
 
-import os
-import json
 import hashlib
+import json
+import os
+from io import BytesIO
 from pathlib import Path
 
 import joblib
@@ -9,7 +10,7 @@ import pandas as pd
 
 
 # ============================================================
-# CONFIGURATION - LOCAL ET PRODUCTION
+# 1. CONFIGURATION
 # ============================================================
 
 DOSSIER_SCRIPT = Path(__file__).resolve().parent
@@ -22,130 +23,61 @@ MODELS_DIR = Path(
     os.getenv("MODELS_DIR", str(DOSSIER_ML / "modeles"))
 )
 
-MODEL_PATH = Path(
-    os.getenv(
-        "MODEL_PATH",
-        str(DOSSIER_ML / "modele_temps_trajet.pkl")
-    )
-)
-
 VERSION_ACTIVE_PATH = MODELS_DIR / "version_active.json"
 
 
 # ============================================================
-# IDENTIFICATION DU MODELE
+# 2. IDENTIFICATION DE LA VERSION ACTIVE
 # ============================================================
 
-def calculer_sha256(chemin):
-    sha = hashlib.sha256()
+if not VERSION_ACTIVE_PATH.is_file():
+    raise FileNotFoundError(
+        "Aucune version active : initialiser V1 avant "
+        "d'effectuer des predictions."
+    )
 
-    with open(chemin, "rb") as fichier:
-        for bloc in iter(lambda: fichier.read(1024 * 1024), b""):
-            sha.update(bloc)
+with open(VERSION_ACTIVE_PATH, "r", encoding="utf-8") as fichier:
+    etat = json.load(fichier)
 
-    return sha.hexdigest()
+VERSION_MODELE_CHARGE = etat["version"]
+
+# La version doit correspondre à un dossier v1, v2...
+import re
+
+if not re.fullmatch(r"v[1-9][0-9]*", VERSION_MODELE_CHARGE):
+    raise ValueError("Version du modele invalide")
+
+MODEL_PATH = MODELS_DIR / VERSION_MODELE_CHARGE / "model.pkl"
+
+if not MODEL_PATH.is_file():
+    raise FileNotFoundError(
+        f"Modele actif introuvable : {MODEL_PATH}"
+    )
 
 
 # ============================================================
-# CHARGEMENT DU MODELE ET DE SA VERSION
+# 3. CONTROLE DU SHA-256
 # ============================================================
 
-# On memorise la version au moment du chargement.
-# Elle ne change pas tant que Python n'est pas recharge.
-
-VERSION_MODELE_CHARGE = "non_identifiee"
-SHA_MODELE_CHARGE = None
-
-# Lire le modele une seule fois et calculer son empreinte
-# a partir des memes octets.
 donnees_modele = MODEL_PATH.read_bytes()
 
 SHA_MODELE_CHARGE = hashlib.sha256(
     donnees_modele
 ).hexdigest()
 
-# Controle de coherence avec le fichier d'etat
-if VERSION_ACTIVE_PATH.is_file():
+if SHA_MODELE_CHARGE != etat.get("sha256_actif"):
+    raise ValueError(
+        "Le modele charge ne correspond pas "
+        "au SHA-256 de version_active.json"
+    )
 
-    with open(
-        VERSION_ACTIVE_PATH,
-        "r",
-        encoding="utf-8"
-    ) as fichier:
-        etat = json.load(fichier)
 
-    if SHA_MODELE_CHARGE != etat.get("sha256_actif"):
-        raise ValueError(
-            "Le modele de production ne correspond pas "
-            "a la version active enregistree."
-        )
-
-    VERSION_MODELE_CHARGE = etat["version"]
-
-# joblib charge le modele a partir des octets verifies
-from io import BytesIO
+# ============================================================
+# 4. CHARGEMENT DU MODELE
+# ============================================================
 
 modele = joblib.load(BytesIO(donnees_modele))
 
 
-# ============================================================
-# INFORMATIONS DU MODELE
-# ============================================================
-
 def obtenir_version_modele():
     return VERSION_MODELE_CHARGE
-
-
-# ============================================================
-# FONCTION DE PREDICTION
-# ============================================================
-
-def predire_temps_trajet(
-    trip_distance,
-    heure,
-    minute,
-    mois,
-    est_weekend,
-    nom_jour,
-    id_localisation_d,
-    id_localisation_a
-):
-
-    donnees = pd.DataFrame([
-        {
-            "nom_jour": nom_jour,
-            "id_localisation_d": id_localisation_d,
-            "id_localisation_a": id_localisation_a,
-            "trip_distance": trip_distance,
-            "heure": heure,
-            "minute": minute,
-            "est_weekend": int(est_weekend),
-            "mois": mois
-        }
-    ])
-
-    prediction = modele.predict(donnees)
-
-    return float(prediction[0])
-
-
-# ============================================================
-# TEST LOCAL
-# ============================================================
-
-if __name__ == "__main__":
-
-    print("Version du modele charge :", obtenir_version_modele())
-
-    resultat = predire_temps_trajet(
-        trip_distance=5.2,
-        heure=14,
-        minute=30,
-        mois=1,
-        est_weekend=0,
-        nom_jour="Friday",
-        id_localisation_d=132,
-        id_localisation_a=161
-    )
-
-    print(f"Temps de trajet estime : {resultat:.2f} minutes")
