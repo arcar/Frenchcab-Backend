@@ -1,3 +1,4 @@
+
 # Environnements Python
 **/.venv/
 **/venv/
@@ -27,3 +28,11 @@ node_modules/
 # Docker
 Dockerfile*
 docker-compose*.yml
+
+# Modèles Machine Learning
+ml/modeles/
+ml/*.pkl
+ml/*.joblib
+
+# Données volumineuses
+raw_data/

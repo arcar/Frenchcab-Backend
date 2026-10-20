@@ -125,10 +125,10 @@ def calculer_duree(demande):
     with ouvrir_db_relationnelle() as con:
         distance = estimer_distance(con, demande.zone_depart, demande.zone_arrivee)
 
-    # Import ici : le modele (.pkl) n'est charge qu'a la premiere prediction
-    from ml.prediction import predire_temps_trajet
-
     try:
+        # Import ici : le modele (.pkl) n'est charge qu'a la premiere prediction
+        from ml.prediction import predire_temps_trajet
+
         duree = predire_temps_trajet(
             trip_distance=distance,
             heure=moment.hour,
@@ -142,7 +142,7 @@ def calculer_duree(demande):
     except FileNotFoundError:
         raise HTTPException(
             status_code=503,
-            detail="Modele absent : lancez ml/entrainement.py.",
+            detail="Modèle indisponible : aucune version active ou fichier modèle introuvable.",
         )
     return round(duree, 1), round(distance, 2), moment
 
