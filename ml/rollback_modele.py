@@ -1,76 +1,139 @@
 
-import hashlib
 import json
-import os
-import shutil
 import sys
-from pathlib import Path
+
+from publier_modele import (
+    DOSSIER_ML,
+    ETAT,
+    PRODUCTION,
+    RESULTATS,
+    calculer_sha256,
+    enregistrer_etat,
+    lire_json,
+    remplacer_fichier,
+    verifier_version,
+)
 
 
-# Chemins compatibles local et Docker
-DOSSIER_SCRIPT = Path(__file__).resolve().parent
-DOSSIER_ML = Path(os.getenv("ML_DIR", str(DOSSIER_SCRIPT)))
+def restaurer_version_precedente():
 
-PRODUCTION = DOSSIER_ML / "modele_temps_trajet.pkl"
-RESULTATS_PRODUCTION = DOSSIER_ML / "resultats.json"
+    # ==========================================
+    # 1. LECTURE DE L'ETAT ACTUEL
+    # ==========================================
 
-PRECEDENT = DOSSIER_ML / "modele_precedent.pkl"
-RESULTATS_PRECEDENTS = DOSSIER_ML / "resultats_precedents.json"
+    if not ETAT.is_file():
+        raise FileNotFoundError(
+            "Aucun fichier version_active.json disponible"
+        )
 
+    etat = lire_json(ETAT)
 
-def calculer_version(chemin):
-    sha256 = hashlib.sha256()
+    version_actuelle = etat.get("version_active")
+    version_precedente = etat.get("version_precedente")
 
-    with open(chemin, "rb") as fichier:
-        for bloc in iter(lambda: fichier.read(1024 * 1024), b""):
-            sha256.update(bloc)
+    if not version_precedente:
+        raise ValueError(
+            "Aucune version precedente disponible pour le rollback"
+        )
 
-    return sha256.hexdigest()[:12]
+    if version_actuelle == version_precedente:
+        raise ValueError(
+            "Les versions active et precedente sont identiques"
+        )
+
+    # ==========================================
+    # 2. CONTROLE DU MODELE ACTUEL
+    # ==========================================
+
+    if not PRODUCTION.is_file():
+        raise FileNotFoundError(
+            "Le modele de production est introuvable"
+        )
+
+    sha_production = calculer_sha256(PRODUCTION)
+
+    if sha_production != etat.get("sha256_actif"):
+        raise ValueError(
+            "Le fichier de production ne correspond pas "
+            "a la version active enregistree"
+        )
+
+    # ==========================================
+    # 3. VERIFICATION DE LA VERSION PRECEDENTE
+    # ==========================================
+
+    rapport = lire_json(RESULTATS)
+
+    chemin_precedent, sha_precedent, mae = verifier_version(
+        version_precedente,
+        rapport
+    )
+
+    # ==========================================
+    # 4. PREPARATION DU NOUVEL ETAT
+    # ==========================================
+
+    nouvel_etat = {
+        "version_active": version_precedente,
+        "version_precedente": version_actuelle,
+        "sha256_actif": sha_precedent
+    }
+
+    # ==========================================
+    # 5. RESTAURATION DU MODELE
+    # ==========================================
+
+    # On utilise un verrou pour eviter qu'une
+    # activation et un rollback se chevauchent.
+    # Le verrou commun sera ajoute aux deux scripts
+    # lors de l'etape de securisation.
+
+    import shutil
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory(dir=DOSSIER_ML) as sauvegarde:
+        dossier_secours = Path(sauvegarde)
+
+        ancien_modele = dossier_secours / "production.pkl"
+        ancien_etat = dossier_secours / "etat.json"
+
+        shutil.copy2(PRODUCTION, ancien_modele)
+        shutil.copy2(ETAT, ancien_etat)
+
+        try:
+            remplacer_fichier(chemin_precedent, PRODUCTION)
+            enregistrer_etat(nouvel_etat)
+
+        except Exception:
+            remplacer_fichier(ancien_modele, PRODUCTION)
+            remplacer_fichier(ancien_etat, ETAT)
+            raise
+
+    # ==========================================
+    # 6. CONFIRMATION
+    # ==========================================
+
+    print("=== ROLLBACK REUSSI ===")
+    print("Version restauree :", version_precedente)
+    print("Version precedente :", version_actuelle)
+    print("SHA-256 :", sha_precedent[:12])
+    print("MAE :", mae, "minutes")
+    print("Redemarrage du backend necessaire")
 
 
 def main():
+    try:
+        restaurer_version_precedente()
 
-    if not PRECEDENT.is_file():
-        sys.exit("ECHEC : aucun modèle précédent disponible")
-
-    if not RESULTATS_PRECEDENTS.is_file():
-        sys.exit("ECHEC : rapport du modèle précédent introuvable")
-
-    rapport = json.loads(
-        RESULTATS_PRECEDENTS.read_text(encoding="utf-8")
-    )
-
-    version_precedente = calculer_version(PRECEDENT)
-
-    if version_precedente != rapport["modele"]["version"]:
-        sys.exit(
-            "ECHEC : le modèle précédent ne correspond "
-            "pas au rapport enregistré"
-        )
-
-    if (
-        rapport["statut"] != "OK"
-        or rapport["mae_minutes"] > 6
-    ):
-        sys.exit(
-            "ECHEC : le modèle précédent ne respecte "
-            "pas le seuil de qualité"
-        )
-
-    # Restaurer le modèle précédent
-    temporaire = DOSSIER_ML / "modele_restauration.tmp"
-    shutil.copy2(PRECEDENT, temporaire)
-    os.replace(temporaire, PRODUCTION)
-
-    shutil.copy2(
-        RESULTATS_PRECEDENTS,
-        RESULTATS_PRODUCTION
-    )
-
-    print("Rollback réussi")
-    print("Version restaurée :", version_precedente)
-    print("MAE :", rapport["mae_minutes"], "minutes")
-    print("Redémarrage du backend nécessaire")
+    except (
+        FileNotFoundError,
+        KeyError,
+        ValueError,
+        OSError,
+        json.JSONDecodeError
+    ) as erreur:
+        sys.exit(f"ECHEC : {erreur}")
 
 
 if __name__ == "__main__":
