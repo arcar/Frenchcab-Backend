@@ -5,107 +5,135 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: "Operation MLOps"
+        description: "Opération MLOps à effectuer"
         required: true
         type: choice
         options:
           - verifier
           - entrainer
           - comparer
+          - initialiser
           - activer
           - rollback
         default: verifier
 
       version:
-        description: "Version concernee (v1, v2...)"
+        description: "Version candidate à comparer ou à activer"
         required: true
         type: string
         default: "v2"
 
+      version_actuelle:
+        description: "Version de référence pour la comparaison"
+        required: true
+        type: string
+        default: "v1"
+
 permissions:
   contents: read
 
-# Meme groupe que cd.yml
+# Évite deux opérations MLOps concurrentes.
+# Même groupe que le workflow CD.
 concurrency:
   group: frenchcab-backend-production
   cancel-in-progress: false
 
 jobs:
   mlops:
+    name: Gestion des versions ML
     runs-on: ubuntu-latest
     timeout-minutes: 120
 
     steps:
-      - name: Executer MLOps sur la VM
+      - name: Exécuter l'opération MLOps sur la VM
         uses: appleboy/ssh-action@v1
-
         env:
           OPERATION: ${{ inputs.operation }}
           VERSION: ${{ inputs.version }}
+          VERSION_ACTUELLE: ${{ inputs.version_actuelle }}
 
         with:
-          host: ${{ vars.VM_HOST }}
-          username: ${{ vars.VM_USER }}
-          password: ${{ secrets.VM_PASSWORD }}
-
-          envs: OPERATION,VERSION
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          port: ${{ secrets.VM_SSH_PORT }}
+          envs: OPERATION,VERSION,VERSION_ACTUELLE
           command_timeout: 110m
 
           script: |
             set -eu
+
             cd /home/groupe2/frenchcab
 
-            echo "=== MLOPS FRENCHCAB ==="
-            echo "Operation : $OPERATION"
-            echo "Version : $VERSION"
+            echo "=================================="
+            echo "MLOPS FRENCHCAB"
+            echo "Opération : $OPERATION"
+            echo "Version candidate : $VERSION"
+            echo "Version référence : $VERSION_ACTUELLE"
+            echo "=================================="
 
-            # Valider la version avant utilisation
-            case "$VERSION" in
-              v[1-9]*)
-                if ! echo "$VERSION" |
-                  grep -Eq '^v[1-9][0-9]*$'; then
-                  echo "Version invalide"
-                  exit 1
-                fi
-                ;;
-              *)
-                echo "Version invalide"
-                exit 1
-                ;;
-            esac
+            # -------------------------------------------
+            # CONFIGURATION
+            # -------------------------------------------
 
-            # Variables de configuration Docker
             ML_DIR=/ml
             MODELS_DIR=/ml/modeles
 
-            # Verifier la disponibilite du backend
-            docker compose exec -T backend test -d /app/ml
+            # Vérification des identifiants de version
+            printf '%s\n' "$VERSION" |
+              grep -Eq '^v[1-9][0-9]*$' || {
+                echo "Version candidate invalide."
+                exit 1
+              }
 
-            # Controle HTTP apres changement de modele
+            printf '%s\n' "$VERSION_ACTUELLE" |
+              grep -Eq '^v[1-9][0-9]*$' || {
+                echo "Version de référence invalide."
+                exit 1
+              }
+
+            # -------------------------------------------
+            # VÉRIFICATION API
+            # -------------------------------------------
+
             verifier_api() {
               attendu="$1"
+              tentative=1
 
-              for tentative in $(seq 1 20); do
-                reponse=$(curl -fsS --max-time 5 \
+              echo "Vérification de l'API pour $attendu"
+
+              while [ "$tentative" -le 20 ]; do
+                reponse=$(curl -fsS \
                   http://127.0.0.1:3001/modele/version \
-                  2>/dev/null) || reponse=""
+                  2>/dev/null || true)
 
-                echo "API : $reponse"
-
-                if echo "$reponse" |
-                  grep -Fq "\"version\":\"$attendu\""; then
-                  echo "Version $attendu confirmee par l'API"
+                if printf '%s' "$reponse" |
+                    grep -Eq "\"version\"[[:space:]]*:[[:space:]]*\"$attendu\""; then
+                  echo "API OK - Modèle chargé : $attendu"
                   return 0
                 fi
 
-                echo "Attente du backend : $tentative/20"
+                echo "Tentative $tentative/20"
                 sleep 3
+                tentative=$((tentative + 1))
               done
 
-              echo "ERREUR : version attendue non confirmee"
-              docker compose logs --tail=50 backend
+              echo "ECHEC : l'API ne confirme pas la version $attendu"
               return 1
             }
+
+            # -------------------------------------------
+            # CONTROLE DU CONTENEUR
+            # -------------------------------------------
+
+            docker compose ps backend
+
+            docker compose exec -T backend \
+              test -d /app/ml
+
+            # -------------------------------------------
+            # OPERATIONS
+            # -------------------------------------------
 
             case "$OPERATION" in
 
@@ -113,17 +141,26 @@ jobs:
                 echo "=== VERSIONS DISPONIBLES ==="
 
                 docker compose exec -T backend \
-                  ls -la "$MODELS_DIR"
+                  python -c "from pathlib import Path; d=Path('/ml/modeles'); print([p.name for p in d.glob('v[0-9]*') if (p/'model.pkl').is_file()])"
 
-                echo "=== MODELE DE PRODUCTION ==="
+                echo "=== FICHIER DE VERSION ACTIVE ==="
 
-                docker compose exec -T backend \
-                  sha256sum /ml/modele_temps_trajet.pkl
+                if docker compose exec -T backend \
+                    test -f "$MODELS_DIR/version_active.json"; then
 
-                echo "=== VERSION CHARGEE PAR L'API ==="
+                  docker compose exec -T backend \
+                    cat "$MODELS_DIR/version_active.json"
 
-                curl -fsS \
-                  http://127.0.0.1:3001/modele/version
+                  echo "=== VERSION CHARGEE PAR L'API ==="
+
+                  curl -fsS \
+                    http://127.0.0.1:3001/modele/version
+
+                  echo ""
+
+                else
+                  echo "Aucune version initialisée."
+                fi
                 ;;
 
               entrainer)
@@ -131,34 +168,57 @@ jobs:
 
                 docker compose exec -T \
                   -e MODELS_DIR="$MODELS_DIR" \
-                  backend python /app/ml/entrainement.py
+                  backend python -m ml.entrainement
 
-                echo "=== ENTRAINEMENT TERMINE ==="
+                echo "Entraînement terminé."
+                echo "Aucune activation automatique."
                 ;;
 
               comparer)
                 echo "=== COMPARAISON ==="
 
+                if [ "$VERSION_ACTUELLE" = "$VERSION" ]; then
+                  echo "Les versions à comparer doivent être différentes."
+                  exit 1
+                fi
+
                 docker compose exec -T \
                   -e MODELS_DIR="$MODELS_DIR" \
                   -e EVALUATION_DATA_PATH=/raw_data/yellow_tripdata_2026-04.parquet \
-                  backend python /app/ml/MLO.py \
+                  backend python -m ml.MLO \
+                    --actuelle "$VERSION_ACTUELLE" \
                     --candidate "$VERSION" \
                     --seuil 6
 
-                echo "=== RAPPORT ==="
+                echo "=== RAPPORT DE COMPARAISON ==="
 
                 docker compose exec -T backend \
-                  cat /ml/modeles/resultats_comparaison.json
+                  cat "$MODELS_DIR/resultats_comparaison.json"
                 ;;
 
-              
-              activer)
-                echo "=== ACTIVATION DU MODELE $VERSION ==="
+              initialiser)
+                echo "=== INITIALISATION DE V1 ==="
 
                 docker compose exec -T \
-                  -e ML_DIR=/ml \
-                  -e MODELS_DIR=/ml/modeles \
+                  -e ML_DIR="$ML_DIR" \
+                  -e MODELS_DIR="$MODELS_DIR" \
+                  backend python -m ml.publier_modele \
+                    --version v1 \
+                    --initialiser
+
+                echo "=== REDEMARRAGE DU BACKEND ==="
+
+                docker compose restart backend
+
+                verifier_api "v1"
+                ;;
+
+              activer)
+                echo "=== ACTIVATION DE $VERSION ==="
+
+                docker compose exec -T \
+                  -e ML_DIR="$ML_DIR" \
+                  -e MODELS_DIR="$MODELS_DIR" \
                   backend python -m ml.publier_modele \
                     --version "$VERSION"
 
@@ -166,66 +226,35 @@ jobs:
 
                 docker compose restart backend
 
-                echo "=== VERIFICATION DU MODELE CHARGE ==="
-
                 verifier_api "$VERSION"
                 ;;
 
-
-                # Commandes prevues apres validation :
-                # docker compose exec -T \
-                #   -e ML_DIR="$ML_DIR" \
-                #   -e MODELS_DIR="$MODELS_DIR" \
-                #   backend python /app/ml/publier_modele.py \
-                #     --version "$VERSION"
-                #
-                # docker compose restart backend
-                # verifier_api "$VERSION"
-                ;;
-
-              
               rollback)
-                echo "=== RESTAURATION DU MODELE PRECEDENT ==="
+                echo "=== ROLLBACK ==="
+
+                VERSION_RESTAUREE=$(docker compose exec -T backend \
+                  python -c "import json; print(json.load(open('/ml/modeles/version_active.json'))['precedente'] or '')")
+
+                if [ -z "$VERSION_RESTAUREE" ]; then
+                  echo "Rollback impossible : aucune version précédente."
+                  exit 1
+                fi
 
                 docker compose exec -T \
-                  -e ML_DIR=/ml \
-                  -e MODELS_DIR=/ml/modeles \
+                  -e ML_DIR="$ML_DIR" \
+                  -e MODELS_DIR="$MODELS_DIR" \
                   backend python -m ml.rollback_modele
 
                 echo "=== REDEMARRAGE DU BACKEND ==="
 
                 docker compose restart backend
 
-                echo "=== LECTURE DE LA VERSION RESTAUREE ==="
-
-                VERSION_RESTAUREE=$(docker compose exec -T \
-                  -e MODELS_DIR=/ml/modeles \
-                  backend python -c \
-                  'import json; print(json.load(open("/ml/modeles/version_active.json"))["version"])')
-
-                echo "Version attendue : $VERSION_RESTAUREE"
-
                 verifier_api "$VERSION_RESTAUREE"
                 ;;
 
-
-                # Commandes prevues apres validation :
-                # docker compose exec -T \
-                #   -e ML_DIR="$ML_DIR" \
-                #   -e MODELS_DIR="$MODELS_DIR" \
-                #   backend python /app/ml/rollback_modele.py
-                #
-                # docker compose restart backend
-                #
-                # Lire la version restauree puis
-                # appeler verifier_api avec cette version.
-                ;;
-
               *)
-                echo "Operation inconnue : $OPERATION"
+                echo "Opération inconnue : $OPERATION"
                 exit 1
                 ;;
-            esac
 
-            echo ""
-            echo "=== OPERATION MLOPS TERMINEE ==="
+            esac

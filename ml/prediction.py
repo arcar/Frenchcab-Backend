@@ -2,7 +2,7 @@
 import hashlib
 import json
 import os
-from io import BytesIO
+import re
 from pathlib import Path
 
 import joblib
@@ -41,9 +41,6 @@ with open(VERSION_ACTIVE_PATH, "r", encoding="utf-8") as fichier:
 
 VERSION_MODELE_CHARGE = etat["version"]
 
-# La version doit correspondre à un dossier v1, v2...
-import re
-
 if not re.fullmatch(r"v[1-9][0-9]*", VERSION_MODELE_CHARGE):
     raise ValueError("Version du modele invalide")
 
@@ -59,11 +56,17 @@ if not MODEL_PATH.is_file():
 # 3. CONTROLE DU SHA-256
 # ============================================================
 
-donnees_modele = MODEL_PATH.read_bytes()
+def calculer_sha256(chemin):
+    sha = hashlib.sha256()
 
-SHA_MODELE_CHARGE = hashlib.sha256(
-    donnees_modele
-).hexdigest()
+    with open(chemin, "rb") as fichier:
+        for bloc in iter(lambda: fichier.read(1024 * 1024), b""):
+            sha.update(bloc)
+
+    return sha.hexdigest()
+
+
+SHA_MODELE_CHARGE = calculer_sha256(MODEL_PATH)
 
 if SHA_MODELE_CHARGE != etat.get("sha256_actif"):
     raise ValueError(
@@ -76,8 +79,44 @@ if SHA_MODELE_CHARGE != etat.get("sha256_actif"):
 # 4. CHARGEMENT DU MODELE
 # ============================================================
 
-modele = joblib.load(BytesIO(donnees_modele))
+modele = joblib.load(MODEL_PATH)
 
 
 def obtenir_version_modele():
     return VERSION_MODELE_CHARGE
+
+
+# ============================================================
+# 5. PREDICTION
+# ============================================================
+
+def predire_temps_trajet(
+    trip_distance,
+    heure,
+    minute,
+    mois,
+    est_weekend,
+    nom_jour,
+    id_localisation_d,
+    id_localisation_a,
+):
+    """
+    Prédit la durée d'un trajet en minutes.
+
+    Le paramètre mois est conservé pour rester compatible
+    avec main.py, mais il n'est pas utilisé par le modèle actuel.
+    """
+
+    donnees = pd.DataFrame([{
+        "nom_jour": nom_jour,
+        "id_localisation_d": id_localisation_d,
+        "id_localisation_a": id_localisation_a,
+        "trip_distance": trip_distance,
+        "heure": heure,
+        "minute": minute,
+        "est_weekend": int(est_weekend),
+    }])
+
+    prediction = modele.predict(donnees)
+
+    return float(prediction[0])
