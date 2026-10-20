@@ -143,80 +143,67 @@ def evaluer(modele, X, y):
 # ============================================================
 
 def main():
-    parser = argparse.ArgumentParser(description="Compare et active les versions du modèle")
+    parser = argparse.ArgumentParser(description="Évalue et compare deux versions du modèle")
+    parser.add_argument("--actuelle", help="version de référence (défaut : version active)")
     parser.add_argument("--candidate", help="version candidate (défaut : la plus récente)")
     parser.add_argument("--donnees", default=DONNEES_PAR_DEFAUT)
     parser.add_argument("--seuil", type=float, default=SEUIL_MAE_PAR_DEFAUT)
     args = parser.parse_args()
-
-    etat = lire_etat_actif()
-
-    # ---------- Retour arrière ----------
-    
 
     # ---------- Choix des versions ----------
     versions = lister_versions()
     if not versions:
         sys.exit(f"Aucune version trouvée dans {MODELS_DIR}")
 
-    actuelle = etat["version"]
     candidate = args.candidate or versions[-1]
+
+    autres = [v for v in versions if v != candidate]
+    actuelle = args.actuelle or lire_etat_actif()["version"] or (autres[-1] if autres else None)
+
+    if not actuelle:
+        sys.exit("Une seule version disponible : entraînez-en une autre pour comparer.")
+    if actuelle == candidate:
+        sys.exit(f"Les deux versions sont identiques ({actuelle}).")
 
     # ---------- Évaluation sur le MÊME jeu ----------
     X, y = preparer_donnees_test(args.donnees)
 
-    res_candidate = evaluer_version(candidate, X, y)
-    res_actuelle = (
-        evaluer_version(actuelle, X, y)
-        if actuelle and actuelle != candidate else None
-    )
-
-    # ---------- Décision ----------
-    mae_c = res_candidate["mae_minutes"]
-    conforme = mae_c <= args.seuil
-
-    if not conforme:
-        decision = actuelle
-        raison = f"{candidate} dépasse le seuil ({mae_c} > {args.seuil} min)"
-    elif candidate == actuelle:
-        decision = actuelle
-        raison = f"{candidate} est déjà la version active"
-    elif res_actuelle is None:
-        decision = candidate
-        raison = f"aucune version active, {candidate} respecte le seuil"
-    elif mae_c < res_actuelle["mae_minutes"]:
-        decision = candidate
-        raison = f"{candidate} respecte le seuil et fait mieux que {actuelle}"
-    else:
-        decision = actuelle
-        raison = f"{candidate} respecte le seuil mais ne fait pas mieux que {actuelle}"
+    resultats = {}
+    for role, version in [("actuelle", actuelle), ("candidate", candidate)]:
+        res = evaluer_version(version, X, y)
+        res["conforme"] = res["mae_minutes"] <= args.seuil
+        resultats[role] = res
 
     # ---------- Affichage lisible ----------
-    print(f"\nComparaison sur {len(X)} trajets ({Path(args.donnees).name})\n")
-    print(f"{'Rôle':<11}{'Version':<9}{'Algorithme':<24}{'MAE (min)':>10}")
-    if res_actuelle:
-        print(f"{'Actuelle':<11}{actuelle:<9}{res_actuelle['algorithme']:<24}" f"{res_actuelle['mae_minutes']:>10.2f}")
-    print(f"{'Candidate':<11}{candidate:<9}{res_candidate['algorithme']:<24}{mae_c:>10.2f}")
-    print(f"\nSeuil : {args.seuil} min → {'CONFORME' if conforme else 'NON CONFORME'}")
-    print(f"Décision : {decision} ({raison})")
+    print(f"\nComparaison sur {len(X)} trajets ({Path(args.donnees).name})")
+    print(f"Seuil de qualité : MAE ≤ {args.seuil} min\n")
+    print(f"{'Rôle':<11}{'Version':<9}{'Algorithme':<24}{'MAE (min)':>10}  Statut")
+    for role, res in resultats.items():
+        statut = "CONFORME" if res["conforme"] else "NON CONFORME"
+        print(f"{role.capitalize():<11}{res['version']:<9}{res['algorithme']:<24}"
+              f"{res['mae_minutes']:>10.2f}  {statut}")
+
+    ecart = resultats["candidate"]["mae_minutes"] - resultats["actuelle"]["mae_minutes"]
+    print(f"\nÉcart candidate - actuelle : {ecart:+.2f} min")
 
     # ---------- Sauvegarde du rapport ----------
-    resultat = {
+    rapport = {
         "date_evaluation": datetime.now().isoformat(timespec="seconds"),
         "donnees_test": Path(args.donnees).name,
         "nb_trajets": len(X),
         "seuil_mae_minutes": args.seuil,
-        "actuelle": res_actuelle,
-        "candidate": {**res_candidate, "conforme": conforme},
-        "decision": decision,
-        "raison": raison,
+        **resultats,
     }
-    chemin_resultats = Path(os.getenv("RESULTATS_PATH", str(MODELS_DIR / "resultats_comparaison.json")))
-    chemin_resultats.write_text(json.dumps(resultat, indent=2, ensure_ascii=False), encoding="utf-8")
+    chemin_resultats = Path(os.getenv(
+        "RESULTATS_PATH", str(MODELS_DIR / "resultats_comparaison.json")
+    ))
+    chemin_resultats.write_text(
+        json.dumps(rapport, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    print(f"Rapport : {chemin_resultats}")
 
-    
-    # 0 = candidate conforme, 1 = échec -> exploitable par la CI
-    sys.exit(0 if conforme else 1)
+    # 0 = candidate conforme, 1 = non conforme -> exploitable par la CI
+    sys.exit(0 if resultats["candidate"]["conforme"] else 1)
 
 
 if __name__ == "__main__":
