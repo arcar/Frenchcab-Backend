@@ -1,0 +1,118 @@
+
+name: MLOps - Gestion des modeles Frenchcab
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Operation MLOps"
+        required: true
+        type: choice
+        options:
+          - verifier
+          - entrainer
+          - comparer
+          - activer
+          - rollback
+        default: verifier
+
+      version:
+        description: "Version concernee"
+        required: true
+        type: choice
+        options:
+          - v1
+          - v2
+        default: v2
+
+permissions:
+  contents: read
+
+# Meme groupe que cd.yml :
+# evite les executions simultanees de ces workflows.
+concurrency:
+  group: frenchcab-backend-production
+  cancel-in-progress: false
+
+jobs:
+  mlops:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Executer une operation MLOps sur la VM
+        uses: appleboy/ssh-action@v1
+
+        env:
+          ACTION_MLOPS: ${{ inputs.action }}
+          VERSION_MODELE: ${{ inputs.version }}
+
+        with:
+          host: ${{ vars.VM_HOST }}
+          username: ${{ vars.VM_USER }}
+          password: ${{ secrets.VM_PASSWORD }}
+          envs: ACTION_MLOPS,VERSION_MODELE
+          command_timeout: 110m
+
+          script: |
+            set -eu
+
+            cd /home/groupe2/frenchcab
+
+            echo "=== MLOPS FRENCHCAB ==="
+            echo "Operation : $ACTION_MLOPS"
+            echo "Version : $VERSION_MODELE"
+
+            # Verifier que le conteneur est disponible
+            docker compose exec -T backend \
+              test -d /app/ml
+
+            case "$ACTION_MLOPS" in
+
+              verifier)
+                echo "=== MODELES DISPONIBLES ==="
+
+                docker compose exec -T backend \
+                  sh -c 'ls -lh /ml/*.pkl'
+
+                echo "=== MODELE ACTIF ==="
+
+                docker compose exec -T backend \
+                  sha256sum /ml/modele_temps_trajet.pkl
+                ;;
+
+              entrainer)
+                echo "=== ENTRAINEMENT ==="
+                echo "Operation en preparation."
+                echo "En attente du versionnement dans entrainement.py."
+                exit 1
+                ;;
+
+              comparer)
+                echo "=== COMPARAISON ==="
+                echo "Operation en preparation."
+                echo "En attente du script de comparaison."
+                exit 1
+                ;;
+
+              activer)
+                echo "=== ACTIVATION ==="
+                echo "Operation en preparation."
+                echo "En attente de la validation des rapports."
+                exit 1
+                ;;
+
+              rollback)
+                echo "=== ROLLBACK ==="
+                echo "Operation en preparation."
+                echo "En attente de la finalisation du rollback."
+                exit 1
+                ;;
+
+              *)
+                echo "Operation inconnue : $ACTION_MLOPS"
+                exit 1
+                ;;
+            esac
+
+            echo "=== OPERATION TERMINEE ==="

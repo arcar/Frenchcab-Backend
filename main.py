@@ -48,6 +48,21 @@ def get_test():
     }
 
 
+# ------------------------------------------------------------
+# GET /modele/version
+# ------------------------------------------------------------
+
+@app.get("/modele/version")
+def get_version_modele():
+    """Retourne la version du modele charge par Frenchcab."""
+
+    from ml.prediction import obtenir_version_modele
+
+    return {
+        "version": obtenir_version_modele()
+    }
+
+
 @app.get("/zones")
 def get_zones():
     """Liste des zones de taxi (pour les listes déroulantes du front)."""
