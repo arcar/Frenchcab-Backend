@@ -186,7 +186,7 @@ def main():
     ecart = resultats["candidate"]["mae_minutes"] - resultats["actuelle"]["mae_minutes"]
     print(f"\nÉcart candidate - actuelle : {ecart:+.2f} min")
 
-    # ---------- Sauvegarde du rapport ----------
+        # ---------- Sauvegarde du rapport ----------
     rapport = {
         "date_evaluation": datetime.now().isoformat(timespec="seconds"),
         "donnees_test": Path(args.donnees).name,
@@ -194,16 +194,27 @@ def main():
         "seuil_mae_minutes": args.seuil,
         **resultats,
     }
+
+    texte = json.dumps(rapport, indent=2, ensure_ascii=False)
+
+    # 1. Dernier rapport (lu par publier_modele.py)
     chemin_resultats = Path(os.getenv(
         "RESULTATS_PATH", str(MODELS_DIR / "resultats_comparaison.json")
     ))
-    chemin_resultats.write_text(
-        json.dumps(rapport, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    chemin_resultats.write_text(texte, encoding="utf-8")
+
+    # 2. Copie datée dans l'historique
+    dossier_historique = MODELS_DIR / "historique_rapports"
+    dossier_historique.mkdir(parents=True, exist_ok=True)
+
+    horodatage = datetime.now().strftime("%Y%m%d_%H%M%S")
+    nom = f"{horodatage}_{actuelle}_vs_{candidate}.json"
+    (dossier_historique / nom).write_text(texte, encoding="utf-8")
+
     print(f"Rapport : {chemin_resultats}")
+    print(f"Historique : {dossier_historique / nom}")
 
     print("\nComparaison terminée.")
-
 
 if __name__ == "__main__":
     main()
