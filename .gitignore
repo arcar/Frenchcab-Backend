@@ -12,3 +12,5 @@ gateway/.env
 # Base de données
 *.db
 *.pkl
+
+ml/modeles

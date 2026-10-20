@@ -1,5 +1,6 @@
 from pathlib import Path
-
+import json
+from datetime import datetime
 import joblib
 import pandas as pd
 import os
@@ -20,10 +21,18 @@ from preparation import (preparer_dataframe_ml, charger_donnees_analytiques)
 # ============================================================
 
 DOSSIER_SCRIPT = Path(__file__).resolve().parent
-MODEL_PATH = Path(os.getenv("MODEL_OUTPUT_PATH", "/ml/modele_candidat.pkl"))
+DOSSIER_MODELES = Path(os.getenv("MODELS_DIR", str(DOSSIER_SCRIPT / "modeles")))
 
 LIMIT_DATA = 1000_000
 
+def prochaine_version(dossier):
+    dossier.mkdir(parents=True, exist_ok=True)
+    numeros = [
+        int(d.name[1:])
+        for d in dossier.iterdir()
+        if d.is_dir() and d.name.startswith("v") and d.name[1:].isdigit()
+    ]
+    return f"v{max(numeros, default=0) + 1}"
 
 # ============================================================
 # CHARGEMENT DES DONNÉES
@@ -228,7 +237,35 @@ print("\nRésultats sur le test :")
 print(pd.Series(resultats_test).round(2))
 
 
-# SAUVEGARDE
-joblib.dump(modele_final, MODEL_PATH)
+# ============================================================
+# SAUVEGARDE DE LA VERSION
+# ============================================================
 
-print(f"\nModèle sauvegardé dans : {MODEL_PATH}")
+version = prochaine_version(DOSSIER_MODELES)
+dossier_version = DOSSIER_MODELES / version
+dossier_version.mkdir()
+
+# 1. Le modèle
+joblib.dump(modele_final, dossier_version / "model.pkl")
+
+# 2. Les résultats de validation des deux modèles comparés
+resultats_df.round(4).to_csv(dossier_version / "evaluation_validation.csv")
+
+# 3. Les métadonnées + résultats sur le test
+metadata = {
+    "version": version,
+    "date_entrainement": datetime.now().isoformat(timespec="seconds"),
+    "algorithme": meilleur_nom,
+    "hyperparametres": modele_final.named_steps["reg"].get_params(),
+    "features": features,
+    "nb_lignes": {
+        "train_val": len(X_train_val),
+        "test": len(X_test),
+    },
+    "metriques_test": {k: round(float(v), 4) for k, v in resultats_test.items()},
+}
+
+with open(dossier_version / "metadata.json", "w", encoding="utf-8") as f:
+    json.dump(metadata, f, indent=2, ensure_ascii=False, default=str)
+
+print(f"\nVersion {version} sauvegardée dans : {dossier_version}")
