@@ -95,7 +95,7 @@ notamment celles pouvant servir à l'analyse ou à la prédiction.
 
 Le traitement des données est organisé en trois étapes :
 
-1. Créer un fichier `raw_data` dans `Frenchcab-Backend`, pour acceuillir le fichier parquet.
+1. Créer un dossier `raw_data` dans `Frenchcab-Backend`, pour acceuillir le fichier parquet.
 Télécharger le dossier parquet ici : https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2026-01.parquet
 
 2. `Extract.py`
@@ -167,16 +167,45 @@ LinearRegression
 RandomForestRegressor
 ```
 
-## Entrainement ml
+### Entrainement ml
 
 Lancer le fichier `entrainement.py` pour créer le modèle du ml `modele_temps_trajet.pkl"`, qui sera dans le dossier `ml`.
 
-## Prédiction
+### Prédiction
 
 Lancer le fichier `prediction.py` pour avoir une prédiction, vous devez obtenir dans le log une prédiction : *Temps de trajet estimé : 17.75 minutes*
 
 
-## MLOPS
+## MLOps — Entraînement et déploiement du modèle
+
+### Objectif
+
+Le pipeline MLOps permet d'automatiser l'entraînement, l'évaluation et la mise en production du modèle de prédiction de durée des trajets de taxi.
+
+### Fonctionnement du pipeline
+
+Le processus repose sur GitHub Actions, Docker et une VM Linux.
+
+1. **CI (`ci.yml`)** : exécute les tests Python, fusionne les modifications dans `dev` et publie une nouvelle image du backend sur Docker Hub.
+2. **CD (`cd.yml`)** : déclenchée après une CI lancée manuellement sur `dev`, elle déploie l'image Docker sur la VM.
+3. **Entraînement (`ml/entrainement.py`)** : entraîne les modèles sur la base décisionnelle et enregistre le meilleur sous `modele_candidat.pkl`.
+4. **Évaluation (`ml/MLO.py`)** : teste le candidat sur les données d'avril 2026 et calcule la MAE.
+5. **Publication (`ml/publier_modele.py`)** : si la MAE est inférieure ou égale à **6 minutes**, le candidat remplace le modèle de production `modele_temps_trajet.pkl`, puis le backend redémarre.
+
+En cas d'échec de l'évaluation, le modèle de production est conservé.
+
+### Fichiers principaux
+
+| Fichier | Rôle |
+|---|---|
+| `ml/preparation.py` | Préparation des données ML |
+| `ml/entrainement.py` | Entraînement et sélection du modèle |
+| `ml/MLO.py` | Évaluation et génération du rapport JSON |
+| `ml/publier_modele.py` | Validation et publication du modèle |
+| `ml/prediction.py` | Chargement du modèle pour les prédictions |
+
+### Focus `MLO.py`
+
 Commencer par télécharger le nouveaux parquet qui correspond à la pèriode d'Avril 2026 : https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2026-04.parquet
 
 Puis lancer le fichier MLO.py :
@@ -189,6 +218,52 @@ Le fichier MLO va :
   - retester le modèle **MAE** 
   - définir un seuil de qualité en audessus duquel le ML est considéré comme non efficace
   - crée un rapport `resultats.json`
+
+### Fichiers sur la VM
+
+Les modèles sont conservés dans le volume `/home/groupe2/frenchcab/ml/` :
+
+- `modele_candidat.pkl` : nouveau modèle entraîné.
+- `resultats_candidat.json` : rapport d'évaluation.
+- `modele_temps_trajet.pkl` : modèle utilisé en production.
+- `resultats.json` : rapport du modèle publié.
+
+
+### Gestion des modèles : candidat et production
+
+Le pipeline MLOps utilise deux modèles distincts pour éviter de remplacer un modèle fonctionnel par un modèle moins performant.
+
+**1. Modèle candidat (`modele_candidat.pkl`)**
+
+- Généré à chaque nouvel entraînement.
+- Enregistré sur la VM dans le volume `/ml/`.
+- Évalué sur des données de test indépendantes.
+- N'est pas utilisé par l'API pour effectuer les prédictions.
+
+**2. Modèle de production (`modele_temps_trajet.pkl`)**
+
+- Correspond au modèle actuellement utilisé par l'API FastAPI.
+- Est conservé sur la VM dans un volume Docker persistant.
+- Continue de fonctionner pendant l'entraînement et l'évaluation du candidat.
+- N'est remplacé que si le candidat réussit les contrôles de validation.
+
+**3. Condition de publication**
+
+Le script `MLO.py` calcule la MAE du candidat et produit un rapport `resultats_candidat.json`.
+
+Le script `publier_modele.py` vérifie ensuite :
+
+- Que le modèle candidat et son rapport existent.
+- Que le rapport correspond bien au candidat évalué (empreinte SHA-256).
+- Que l'évaluation est validée, avec une **MAE ≤ 6 minutes**.
+
+Si toutes les conditions sont respectées, le candidat remplace le modèle de production et le backend est redémarré pour charger le nouveau modèle.
+
+Dans le cas contraire, le candidat est rejeté et **le modèle de production reste inchangé**.
+
+**Pourquoi cette séparation ?**
+
+Elle permet de sécuriser les mises à jour du ML : nous pouvons entraîner et tester de nouveaux modèles sans interrompre les prédictions ni remplacer prématurément un modèle déjà fonctionnel.
 
 ## Etat d'avancement S3
 Le modèle est sur la VM ainsi que les données et bases
