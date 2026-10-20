@@ -108,30 +108,6 @@ preprocessor = ColumnTransformer([
     ("num", "passthrough", num_cols)
 ])
 
-# ============================================================
-# RÉGRESSION LINÉAIRE
-# ============================================================
-
-lin_model = Pipeline([
-    ("prep", preprocessor),
-    ("reg", LinearRegression())
-])
-
-# ============================================================
-# RANDOM FOREST
-# ============================================================
-
-rf_model = Pipeline([
-    ("prep", preprocessor),
-    ("reg",
-        RandomForestRegressor(
-            n_estimators=50,
-            max_depth=15,
-            random_state=42,
-            n_jobs=-1
-        )
-    )
-])
 
 
 # ============================================================
@@ -209,16 +185,12 @@ print(f"\nModèle choisi : {meilleur_nom}")
 
 
 # ============================================================
-# ENTRAÎNEMENT FINAL SUR TRAIN + VALIDATION
+# RECUPERATION DU MEILLEUR MODELE DEJA ENTRAINE
 # ============================================================
 
-print("\nEntraînement du modèle final...")
+print("\nRécupération du meilleur modèle...")
 
-X_train_val = pd.concat([X_train, X_val])
-y_train_val = pd.concat([y_train, y_val])
-
-modele_final = clone(models[meilleur_nom])
-modele_final.fit(X_train_val, y_train_val)
+modele_final = models[meilleur_nom]
 
 # ============================================================
 # ÉVALUATION FINALE SUR LE TEST
@@ -251,6 +223,7 @@ joblib.dump(modele_final, dossier_version / "model.pkl")
 # 2. Les résultats de validation des deux modèles comparés
 resultats_df.round(4).to_csv(dossier_version / "evaluation_validation.csv")
 
+
 # 3. Les métadonnées + résultats sur le test
 metadata = {
     "version": version,
@@ -259,8 +232,9 @@ metadata = {
     "hyperparametres": modele_final.named_steps["reg"].get_params(),
     "features": features,
     "nb_lignes": {
-        "train_val": len(X_train_val),
-        "test": len(X_test),
+    "train": len(X_train),
+    "validation": len(X_val),
+    "test": len(X_test),
     },
     "metriques_test": {k: round(float(v), 4) for k, v in resultats_test.items()},
 }
