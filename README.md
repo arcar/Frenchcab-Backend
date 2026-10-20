@@ -95,7 +95,7 @@ notamment celles pouvant servir à l'analyse ou à la prédiction.
 
 Le traitement des données est organisé en trois étapes :
 
-1. Créer un fichier `raw_data` dans `Frenchcab-Backend`, pour acceuillir le fichier parquet.
+1. Créer un dossier `raw_data` dans `Frenchcab-Backend`, pour acceuillir le fichier parquet.
 Télécharger le dossier parquet ici : https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2026-01.parquet
 
 2. `Extract.py`
