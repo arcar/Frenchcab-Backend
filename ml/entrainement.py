@@ -20,7 +20,7 @@ from preparation import (preparer_dataframe_ml, charger_donnees_analytiques)
 # ============================================================
 
 DOSSIER_SCRIPT = Path(__file__).resolve().parent
-MODEL_PATH = Path(os.getenv("MODEL_OUTPUT_PATH", "/ml/modele_candidat.pkl"))
+MODEL_PATH = Path(os.getenv("MODEL_OUTPUT_PATH", str(DOSSIER_SCRIPT / "modele_candidat.pkl")))
 
 LIMIT_DATA = 1000_000
 
