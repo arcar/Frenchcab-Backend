@@ -14,7 +14,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.metrics import (mean_absolute_error, mean_absolute_percentage_error)
 from sklearn.base import clone
 
-from preparation import (preparer_dataframe_ml, charger_donnees_analytiques)
+from ml.preparation import preparer_dataframe_ml, charger_donnees_analytiques
 
 # ============================================================
 # CONFIGURATION
