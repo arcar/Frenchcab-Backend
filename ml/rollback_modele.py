@@ -1,6 +1,10 @@
 
 import json
+import shutil
 import sys
+import tempfile
+from datetime import datetime
+from pathlib import Path
 
 from publier_modele import (
     DOSSIER_ML,
@@ -8,6 +12,7 @@ from publier_modele import (
     PRODUCTION,
     RESULTATS,
     calculer_sha256,
+    chemin_version,
     enregistrer_etat,
     lire_json,
     remplacer_fichier,
@@ -15,104 +20,100 @@ from publier_modele import (
 )
 
 
-def restaurer_version_precedente():
+def rollback():
 
     # ==========================================
-    # 1. LECTURE DE L'ETAT ACTUEL
+    # 1. LIRE LA VERSION ACTIVE ET PRECEDENTE
     # ==========================================
 
     if not ETAT.is_file():
         raise FileNotFoundError(
-            "Aucun fichier version_active.json disponible"
+            "Aucune version active enregistree"
         )
 
     etat = lire_json(ETAT)
 
-    version_actuelle = etat.get("version_active")
-    version_precedente = etat.get("version_precedente")
+    version_actuelle = etat.get("version")
+    version_precedente = etat.get("precedente")
 
     if not version_precedente:
         raise ValueError(
-            "Aucune version precedente disponible pour le rollback"
-        )
-
-    if version_actuelle == version_precedente:
-        raise ValueError(
-            "Les versions active et precedente sont identiques"
+            "Aucune version precedente disponible"
         )
 
     # ==========================================
-    # 2. CONTROLE DU MODELE ACTUEL
+    # 2. VERIFIER LE MODELE ACTUEL
     # ==========================================
 
     if not PRODUCTION.is_file():
         raise FileNotFoundError(
-            "Le modele de production est introuvable"
+            "Modele de production introuvable"
         )
 
-    sha_production = calculer_sha256(PRODUCTION)
+    sha_actuel = calculer_sha256(PRODUCTION)
 
-    if sha_production != etat.get("sha256_actif"):
+    if sha_actuel != etat.get("sha256_actif"):
         raise ValueError(
-            "Le fichier de production ne correspond pas "
-            "a la version active enregistree"
+            "Le modele de production ne correspond "
+            "pas a la version active enregistree"
+        )
+
+    fichier_actuel = chemin_version(version_actuelle)
+
+    if (
+        not fichier_actuel.is_file()
+        or calculer_sha256(fichier_actuel) != sha_actuel
+    ):
+        raise ValueError(
+            "La version active ne correspond pas "
+            "au modele de production"
         )
 
     # ==========================================
-    # 3. VERIFICATION DE LA VERSION PRECEDENTE
+    # 3. VERIFIER LA VERSION A RESTAURER
     # ==========================================
 
     rapport = lire_json(RESULTATS)
 
-    chemin_precedent, sha_precedent, mae = verifier_version(
+    fichier_precedent, sha_precedent, mae = verifier_version(
         version_precedente,
         rapport
     )
 
     # ==========================================
-    # 4. PREPARATION DU NOUVEL ETAT
+    # 4. PREPARER LE NOUVEL ETAT
     # ==========================================
 
     nouvel_etat = {
-        "version_active": version_precedente,
-        "version_precedente": version_actuelle,
-        "sha256_actif": sha_precedent
+        "version": version_precedente,
+        "precedente": version_actuelle,
+        "sha256_actif": sha_precedent,
+        "date_activation": datetime.now().isoformat(
+            timespec="seconds"
+        )
     }
 
     # ==========================================
-    # 5. RESTAURATION DU MODELE
+    # 5. RESTAURER LE MODELE
     # ==========================================
 
-    # On utilise un verrou pour eviter qu'une
-    # activation et un rollback se chevauchent.
-    # Le verrou commun sera ajoute aux deux scripts
-    # lors de l'etape de securisation.
+    with tempfile.TemporaryDirectory(dir=DOSSIER_ML) as dossier:
+        secours = Path(dossier)
 
-    import shutil
-    import tempfile
-    from pathlib import Path
+        sauvegarde_modele = secours / "production.pkl"
+        sauvegarde_etat = secours / "etat.json"
 
-    with tempfile.TemporaryDirectory(dir=DOSSIER_ML) as sauvegarde:
-        dossier_secours = Path(sauvegarde)
-
-        ancien_modele = dossier_secours / "production.pkl"
-        ancien_etat = dossier_secours / "etat.json"
-
-        shutil.copy2(PRODUCTION, ancien_modele)
-        shutil.copy2(ETAT, ancien_etat)
+        shutil.copy2(PRODUCTION, sauvegarde_modele)
+        shutil.copy2(ETAT, sauvegarde_etat)
 
         try:
-            remplacer_fichier(chemin_precedent, PRODUCTION)
+            remplacer_fichier(fichier_precedent, PRODUCTION)
             enregistrer_etat(nouvel_etat)
 
         except Exception:
-            remplacer_fichier(ancien_modele, PRODUCTION)
-            remplacer_fichier(ancien_etat, ETAT)
+            remplacer_fichier(sauvegarde_modele, PRODUCTION)
+            remplacer_fichier(sauvegarde_etat, ETAT)
             raise
-
-    # ==========================================
-    # 6. CONFIRMATION
-    # ==========================================
 
     print("=== ROLLBACK REUSSI ===")
     print("Version restauree :", version_precedente)
@@ -124,12 +125,11 @@ def restaurer_version_precedente():
 
 def main():
     try:
-        restaurer_version_precedente()
-
+        rollback()
     except (
         FileNotFoundError,
-        KeyError,
         ValueError,
+        KeyError,
         OSError,
         json.JSONDecodeError
     ) as erreur:

@@ -1,21 +1,25 @@
 
 import os
 import json
+import hashlib
 from pathlib import Path
 
 import joblib
 import pandas as pd
-import hashlib
 
 
 # ============================================================
-# CONFIGURATION - LOCAL ET DOCKER
+# CONFIGURATION - LOCAL ET PRODUCTION
 # ============================================================
 
 DOSSIER_SCRIPT = Path(__file__).resolve().parent
 
 DOSSIER_ML = Path(
     os.getenv("ML_DIR", str(DOSSIER_SCRIPT))
+)
+
+MODELS_DIR = Path(
+    os.getenv("MODELS_DIR", str(DOSSIER_ML / "modeles"))
 )
 
 MODEL_PATH = Path(
@@ -25,41 +29,63 @@ MODEL_PATH = Path(
     )
 )
 
-VERSION_ACTIVE_PATH = DOSSIER_ML / "version_active.json"
+VERSION_ACTIVE_PATH = MODELS_DIR / "version_active.json"
 
+
+# ============================================================
+# IDENTIFICATION DU MODELE
+# ============================================================
+
+def calculer_sha256(chemin):
+    sha = hashlib.sha256()
+
+    with open(chemin, "rb") as fichier:
+        for bloc in iter(lambda: fichier.read(1024 * 1024), b""):
+            sha.update(bloc)
+
+    return sha.hexdigest()
 
 
 # ============================================================
 # CHARGEMENT DU MODELE ET DE SA VERSION
 # ============================================================
 
-modele = joblib.load(MODEL_PATH)
+# On memorise la version au moment du chargement.
+# Elle ne change pas tant que Python n'est pas recharge.
 
 VERSION_MODELE_CHARGE = "non_identifiee"
+SHA_MODELE_CHARGE = None
 
+# Lire le modele une seule fois et calculer son empreinte
+# a partir des memes octets.
+donnees_modele = MODEL_PATH.read_bytes()
+
+SHA_MODELE_CHARGE = hashlib.sha256(
+    donnees_modele
+).hexdigest()
+
+# Controle de coherence avec le fichier d'etat
 if VERSION_ACTIVE_PATH.is_file():
 
-    with open(VERSION_ACTIVE_PATH, "r", encoding="utf-8") as fichier:
+    with open(
+        VERSION_ACTIVE_PATH,
+        "r",
+        encoding="utf-8"
+    ) as fichier:
         etat = json.load(fichier)
 
-    # Calculer l'empreinte du fichier charge
-    sha = hashlib.sha256()
-
-    with open(MODEL_PATH, "rb") as fichier:
-        for bloc in iter(lambda: fichier.read(1024 * 1024), b""):
-            sha.update(bloc)
-
-    # Verifier que le modele correspond a la version active
-    if sha.hexdigest() != etat["sha256_actif"]:
+    if SHA_MODELE_CHARGE != etat.get("sha256_actif"):
         raise ValueError(
-            "Le modele charge ne correspond pas a la version active"
+            "Le modele de production ne correspond pas "
+            "a la version active enregistree."
         )
 
-    VERSION_MODELE_CHARGE = etat["version_active"]
+    VERSION_MODELE_CHARGE = etat["version"]
 
+# joblib charge le modele a partir des octets verifies
+from io import BytesIO
 
-def obtenir_version_modele():
-    return VERSION_MODELE_CHARGE
+modele = joblib.load(BytesIO(donnees_modele))
 
 
 # ============================================================
@@ -100,9 +126,7 @@ def predire_temps_trajet(
 
     prediction = modele.predict(donnees)
 
-    temps_estime = prediction[0]
-
-    return float(temps_estime)
+    return float(prediction[0])
 
 
 # ============================================================
@@ -124,4 +148,4 @@ if __name__ == "__main__":
         id_localisation_a=161
     )
 
-    print(f"Temps de trajet estimé : {resultat:.2f} minutes")
+    print(f"Temps de trajet estime : {resultat:.2f} minutes")

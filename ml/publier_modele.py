@@ -7,33 +7,37 @@ import re
 import shutil
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 
 # ============================================================
-# CONFIGURATION - LOCAL ET DOCKER
+# 1. CONFIGURATION - DEV ET PRODUCTION
 # ============================================================
 
 DOSSIER_SCRIPT = Path(__file__).resolve().parent
-
-DOSSIER_ML = Path(
-    os.getenv("ML_DIR", str(DOSSIER_SCRIPT))
-)
-
-DOSSIER_MODELES = Path(
+DOSSIER_ML = Path(os.getenv("ML_DIR", str(DOSSIER_SCRIPT)))
+MODELS_DIR = Path(
     os.getenv("MODELS_DIR", str(DOSSIER_ML / "modeles"))
 )
 
-RESULTATS = DOSSIER_ML / "resultats.json"
 PRODUCTION = DOSSIER_ML / "modele_temps_trajet.pkl"
-ETAT = DOSSIER_ML / "version_active.json"
+RESULTATS = MODELS_DIR / "resultats_comparaison.json"
+ETAT = MODELS_DIR / "version_active.json"
 
 SEUIL_MAE = 6.0
 
 
 # ============================================================
-# OUTILS
+# 2. FONCTIONS UTILITAIRES
 # ============================================================
+
+def lire_json(chemin):
+    if not chemin.is_file():
+        raise FileNotFoundError(f"Fichier introuvable : {chemin}")
+
+    return json.loads(chemin.read_text(encoding="utf-8"))
+
 
 def calculer_sha256(chemin):
     sha = hashlib.sha256()
@@ -45,188 +49,209 @@ def calculer_sha256(chemin):
     return sha.hexdigest()
 
 
-def lire_json(chemin):
-    if not chemin.is_file():
-        raise FileNotFoundError(f"Fichier introuvable : {chemin}")
+def chemin_version(version):
+    if not re.fullmatch(r"v[1-9][0-9]*", version):
+        raise ValueError("Version invalide : utiliser v1, v2, v3...")
 
-    with open(chemin, "r", encoding="utf-8") as fichier:
-        return json.load(fichier)
+    return MODELS_DIR / version / "model.pkl"
 
 
 def remplacer_fichier(source, destination):
-    """Copie dans un fichier temporaire, puis remplace la destination."""
-
+    """Remplace un fichier en preparant une copie temporaire."""
     with tempfile.NamedTemporaryFile(
         dir=destination.parent,
-        prefix=".modele_",
         suffix=".tmp",
         delete=False
-    ) as temporaire:
-        chemin_temp = Path(temporaire.name)
+    ) as fichier:
+        temporaire = Path(fichier.name)
 
     try:
-        shutil.copy2(source, chemin_temp)
-        os.replace(chemin_temp, destination)
+        shutil.copy2(source, temporaire)
+        os.replace(temporaire, destination)
     finally:
-        chemin_temp.unlink(missing_ok=True)
+        temporaire.unlink(missing_ok=True)
 
 
 def enregistrer_etat(etat):
-    """Enregistre l'etat via un fichier temporaire."""
-
+    """Enregistre le fichier JSON via un fichier temporaire."""
     with tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
-        dir=DOSSIER_ML,
-        prefix=".etat_",
+        dir=ETAT.parent,
         suffix=".tmp",
         delete=False
-    ) as temporaire:
-        chemin_temp = Path(temporaire.name)
-        json.dump(etat, temporaire, indent=2, ensure_ascii=False)
+    ) as fichier:
+        temporaire = Path(fichier.name)
+        json.dump(etat, fichier, indent=2, ensure_ascii=False)
 
     try:
-        os.replace(chemin_temp, ETAT)
+        os.replace(temporaire, ETAT)
     finally:
-        chemin_temp.unlink(missing_ok=True)
+        temporaire.unlink(missing_ok=True)
 
 
 # ============================================================
-# VERIFICATION D'UNE VERSION
+# 3. VERIFIER QUE LA VERSION A ETE EVALUEE
 # ============================================================
 
 def verifier_version(version, rapport):
-    versions = rapport.get("modeles", {})
+    modele = chemin_version(version)
 
-    if version not in versions:
+    if not modele.is_file():
+        raise FileNotFoundError(f"Modele introuvable : {modele}")
+
+    # Format produit par MLO.py :
+    # "actuelle" et "candidate"
+    evaluations = [
+        rapport.get("actuelle"),
+        rapport.get("candidate")
+    ]
+
+    evaluation = next(
+        (
+            item for item in evaluations
+            if isinstance(item, dict)
+            and item.get("version") == version
+        ),
+        None
+    )
+
+    if evaluation is None:
         raise ValueError(
-            f"La version {version} n'est pas presente dans resultats.json"
+            f"La version {version} n'a pas d'evaluation "
+            "dans resultats_comparaison.json"
         )
 
-    evaluation = versions[version]
+    sha_reel = calculer_sha256(modele)
+    sha_evalue = evaluation.get("sha256")
 
-    chemin_modele = DOSSIER_MODELES / version / "model.pkl"
-
-    if not chemin_modele.is_file():
-        raise FileNotFoundError(
-            f"Modele introuvable : {chemin_modele}"
-        )
-
-    sha_reel = calculer_sha256(chemin_modele)
-    sha_evalue = evaluation.get("sha256", "")
-
+    # Le MLO.py actuel enregistre 12 caracteres SHA-256.
     if (
         not isinstance(sha_evalue, str)
-        or len(sha_evalue) < 12
+        or not re.fullmatch(r"[0-9a-f]{12,64}", sha_evalue)
         or not sha_reel.startswith(sha_evalue)
     ):
         raise ValueError(
-            f"Empreinte SHA-256 incorrecte pour {version}"
+            f"Le modele {version} ne correspond pas "
+            "au modele evalue"
         )
 
     mae = float(evaluation["mae_minutes"])
 
-    if (
-        evaluation.get("statut") != "OK"
-        or not (0 <= mae <= SEUIL_MAE)
-    ):
+    if not (0 <= mae <= SEUIL_MAE):
         raise ValueError(
-            f"Version {version} non admissible : MAE = {mae}"
+            f"Modele {version} refuse : MAE = {mae} minutes"
         )
 
-    return chemin_modele, sha_reel, mae
+    # Le rapport doit avoir utilise notre seuil
+    # et les donnees d'evaluation attendues.
+    if float(rapport["seuil_mae_minutes"]) != SEUIL_MAE:
+        raise ValueError("Seuil du rapport incompatible")
+
+    if rapport.get("donnees_test") != "yellow_tripdata_2026-04.parquet":
+        raise ValueError("Jeu d'evaluation non reconnu")
+
+    return modele, sha_reel, mae
 
 
 # ============================================================
-# IDENTIFICATION DU MODELE ACTIF
+# 4. IDENTIFIER LA VERSION ACTUELLE
 # ============================================================
 
-def identifier_version_active(rapport):
+def identifier_version_active():
     if not PRODUCTION.is_file():
-        if ETAT.exists():
-            raise ValueError(
-                "Un etat existe, mais le modele de production est absent"
-            )
-        return None
+        raise FileNotFoundError(
+            "Modele de production introuvable"
+        )
 
-    sha_actif = calculer_sha256(PRODUCTION)
+    sha_production = calculer_sha256(PRODUCTION)
 
+    # Cas normal : une activation a deja eu lieu
     if ETAT.is_file():
         etat = lire_json(ETAT)
-        version = etat["version_active"]
+        version = etat.get("version")
 
-        chemin, sha_attendu, _ = verifier_version(version, rapport)
+        if not version:
+            raise ValueError("Version active absente de l'etat")
 
-        if sha_actif != sha_attendu:
+        fichier = chemin_version(version)
+
+        if (
+            not fichier.is_file()
+            or calculer_sha256(fichier) != sha_production
+        ):
             raise ValueError(
-                "Le fichier de production ne correspond pas "
-                "a la version active enregistree"
+                "Incoherence entre le modele actif "
+                "et version_active.json"
             )
 
         return version
 
-    # Initialisation : reconnaitre une version deja en production.
-    for version in rapport.get("modeles", {}):
-        chemin, sha, _ = verifier_version(version, rapport)
+    # Premiere activation : retrouver la version
+    # correspondant au modele deja en production.
+    if MODELS_DIR.is_dir():
+        for dossier in MODELS_DIR.iterdir():
+            if dossier.is_dir() and re.fullmatch(
+                r"v[1-9][0-9]*", dossier.name
+            ):
+                fichier = chemin_version(dossier.name)
 
-        if sha == sha_actif:
-            return version
+                if (
+                    fichier.is_file()
+                    and calculer_sha256(fichier) == sha_production
+                ):
+                    return dossier.name
 
     raise ValueError(
-        "Le modele actuellement en production n'est pas "
-        "identifie dans resultats.json. Activation refusee."
+        "Impossible d'identifier la version en production. "
+        "Activation refusee pour proteger le modele existant."
     )
 
 
 # ============================================================
-# ACTIVATION
+# 5. ACTIVER UNE VERSION
 # ============================================================
 
 def activer_version(version):
-    if not re.fullmatch(r"v[1-9][0-9]*", version):
-        raise ValueError("Format de version invalide")
-
     rapport = lire_json(RESULTATS)
 
-    chemin_modele, sha, mae = verifier_version(version, rapport)
-    version_actuelle = identifier_version_active(rapport)
+    modele, sha, mae = verifier_version(version, rapport)
+    version_actuelle = identifier_version_active()
 
-    if version_actuelle == version:
+    if version == version_actuelle:
         print(f"La version {version} est deja active.")
         return
 
     nouvel_etat = {
-        "version_active": version,
-        "version_precedente": version_actuelle,
-        "sha256_actif": sha
+        "version": version,
+        "precedente": version_actuelle,
+        "sha256_actif": sha,
+        "date_activation": datetime.now().isoformat(
+            timespec="seconds"
+        )
     }
 
-    # Sauvegarde de secours pour restaurer les fichiers
-    # si une erreur Python survient pendant l'activation.
-    with tempfile.TemporaryDirectory(dir=DOSSIER_ML) as sauvegarde:
-        dossier_secours = Path(sauvegarde)
+    # Sauvegardes temporaires en cas d'erreur Python
+    with tempfile.TemporaryDirectory(dir=DOSSIER_ML) as dossier:
+        secours = Path(dossier)
 
-        ancien_modele = dossier_secours / "production.pkl"
-        ancien_etat = dossier_secours / "etat.json"
+        sauvegarde_modele = secours / "production.pkl"
+        sauvegarde_etat = secours / "etat.json"
 
-        if PRODUCTION.exists():
-            shutil.copy2(PRODUCTION, ancien_modele)
+        shutil.copy2(PRODUCTION, sauvegarde_modele)
 
         if ETAT.exists():
-            shutil.copy2(ETAT, ancien_etat)
+            shutil.copy2(ETAT, sauvegarde_etat)
 
         try:
-            remplacer_fichier(chemin_modele, PRODUCTION)
+            remplacer_fichier(modele, PRODUCTION)
             enregistrer_etat(nouvel_etat)
 
         except Exception:
-            if ancien_modele.exists():
-                remplacer_fichier(ancien_modele, PRODUCTION)
-            else:
-                PRODUCTION.unlink(missing_ok=True)
+            remplacer_fichier(sauvegarde_modele, PRODUCTION)
 
-            if ancien_etat.exists():
-                remplacer_fichier(ancien_etat, ETAT)
+            if sauvegarde_etat.exists():
+                remplacer_fichier(sauvegarde_etat, ETAT)
             else:
                 ETAT.unlink(missing_ok=True)
 
@@ -237,12 +262,16 @@ def activer_version(version):
     print("Version precedente :", version_actuelle)
     print("SHA-256 :", sha[:12])
     print("MAE :", mae, "minutes")
-    print("Redemarrage du backend necessaire")
+    print("Redemarrer le backend pour charger le modele.")
 
+
+# ============================================================
+# 6. EXECUTION
+# ============================================================
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Activation d'une version du modele Frenchcab"
+        description="Activer une version du modele Frenchcab"
     )
 
     parser.add_argument(
@@ -257,8 +286,8 @@ def main():
         activer_version(args.version)
     except (
         FileNotFoundError,
-        KeyError,
         ValueError,
+        KeyError,
         OSError,
         json.JSONDecodeError
     ) as erreur:
