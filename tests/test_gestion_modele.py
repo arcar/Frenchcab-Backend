@@ -315,3 +315,125 @@ def test_rollback_v2_vers_v1(tmp_path, monkeypatch):
 
     # 8. Vérifier que V2 est toujours disponible
     assert (v2 / "model.pkl").read_bytes() == b"modele-v2"
+
+
+def test_rollback_sans_version_precedente(tmp_path, monkeypatch):
+
+    import rollback_modele
+
+    # 1. Préparer les dossiers temporaires
+    dossier_ml = tmp_path / "ml"
+    dossier_modeles = dossier_ml / "modeles"
+    dossier_modeles.mkdir(parents=True)
+
+    # 2. Simuler V2 en production
+    production = dossier_ml / "modele_temps_trajet.pkl"
+    production.write_bytes(b"modele-v2")
+
+    sha_v2 = hashlib.sha256(b"modele-v2").hexdigest()
+
+    # 3. Enregistrer un état sans version précédente
+    etat_path = dossier_modeles / "version_active.json"
+
+    etat_path.write_text(
+        json.dumps({
+            "version": "v2",
+            "precedente": None,
+            "sha256_actif": sha_v2
+        }),
+        encoding="utf-8"
+    )
+
+    # 4. Rediriger les chemins du rollback
+    monkeypatch.setattr(rollback_modele, "ETAT", etat_path)
+    monkeypatch.setattr(rollback_modele, "PRODUCTION", production)
+
+    # 5. Vérifier que le rollback est refusé
+    with pytest.raises(ValueError, match="Aucune version precedente"):
+        rollback_modele.rollback()
+
+    # 6. Vérifier que V2 reste en production
+    assert production.read_bytes() == b"modele-v2"
+
+
+def test_rollback_modele_non_conforme(tmp_path, monkeypatch):
+
+    import rollback_modele
+
+    # 1. Créer les deux modèles fictifs
+    dossier_ml = tmp_path / "ml"
+    dossier_modeles = dossier_ml / "modeles"
+
+    v1 = dossier_modeles / "v1"
+    v2 = dossier_modeles / "v2"
+
+    v1.mkdir(parents=True)
+    v2.mkdir(parents=True)
+
+    (v1 / "model.pkl").write_bytes(b"modele-v1")
+    (v2 / "model.pkl").write_bytes(b"modele-v2")
+
+    sha_v1 = hashlib.sha256(b"modele-v1").hexdigest()
+    sha_v2 = hashlib.sha256(b"modele-v2").hexdigest()
+
+    # 2. V2 est actuellement en production
+    production = dossier_ml / "modele_temps_trajet.pkl"
+    production.write_bytes(b"modele-v2")
+
+    etat_path = dossier_modeles / "version_active.json"
+
+    etat_initial = {
+        "version": "v2",
+        "precedente": "v1",
+        "sha256_actif": sha_v2
+    }
+
+    etat_path.write_text(
+        json.dumps(etat_initial),
+        encoding="utf-8"
+    )
+
+    # 3. V1 ne respecte pas le seuil de qualité
+    rapport_path = dossier_modeles / "resultats_comparaison.json"
+
+    rapport_path.write_text(
+        json.dumps({
+            "donnees_test": "yellow_tripdata_2026-04.parquet",
+            "seuil_mae_minutes": 6.0,
+            "actuelle": {
+                "version": "v1",
+                "sha256": sha_v1[:12],
+                "mae_minutes": 8.0
+            },
+            "candidate": {
+                "version": "v2",
+                "sha256": sha_v2[:12],
+                "mae_minutes": 5.2
+            }
+        }),
+        encoding="utf-8"
+    )
+
+    # 4. Rediriger les chemins des deux modules
+    for module in (publier_modele, rollback_modele):
+        monkeypatch.setattr(module, "DOSSIER_ML", dossier_ml)
+        monkeypatch.setattr(module, "PRODUCTION", production)
+        monkeypatch.setattr(module, "RESULTATS", rapport_path)
+        monkeypatch.setattr(module, "ETAT", etat_path)
+
+    monkeypatch.setattr(
+        publier_modele, "MODELS_DIR", dossier_modeles
+    )
+
+    # 5. Le rollback doit être refusé
+    with pytest.raises(ValueError, match="MAE"):
+        rollback_modele.rollback()
+
+    # 6. V2 reste active
+    assert production.read_bytes() == b"modele-v2"
+
+    etat_final = json.loads(
+        etat_path.read_text(encoding="utf-8")
+    )
+
+    assert etat_final == etat_initial
