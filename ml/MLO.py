@@ -81,12 +81,6 @@ def evaluer_version(version, X, y):
     return {**identifier_modele(version, metadata), "mae_minutes": mae}
 
 
-def activer(version, precedente):
-    FICHIER_ACTIVE.write_text(json.dumps({
-        "version": version,
-        "precedente": precedente,
-        "date_activation": datetime.now().isoformat(timespec="seconds"),}, indent=2), encoding="utf-8")
-    print(f"\nVersion active : {version} (précédente : {precedente})")
 
 # ============================================================
 # 2. PREPARER UN NOUVEAU JEU DE DONNEE TEST
@@ -153,20 +147,12 @@ def main():
     parser.add_argument("--candidate", help="version candidate (défaut : la plus récente)")
     parser.add_argument("--donnees", default=DONNEES_PAR_DEFAUT)
     parser.add_argument("--seuil", type=float, default=SEUIL_MAE_PAR_DEFAUT)
-    parser.add_argument("--activer", action="store_true", help="applique la décision")
-    parser.add_argument("--rollback", action="store_true", help="revient à la version précédente")
     args = parser.parse_args()
 
     etat = lire_etat_actif()
 
     # ---------- Retour arrière ----------
-    if args.rollback:
-        if not etat["precedente"]:
-            sys.exit("Aucune version précédente enregistrée.")
-        if not (MODELS_DIR / etat["precedente"] / "model.pkl").exists():
-            sys.exit(f"La version {etat['precedente']} n'existe plus.")
-        activer(etat["precedente"], etat["version"])
-        return
+    
 
     # ---------- Choix des versions ----------
     versions = lister_versions()
@@ -225,19 +211,10 @@ def main():
         "decision": decision,
         "raison": raison,
     }
-    chemin_resultats = Path(os.getenv(
-        "RESULTATS_PATH", str(MODELS_DIR / "resultats_comparaison.json")
-    ))
-    chemin_resultats.write_text(
-        json.dumps(resultat, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    chemin_resultats = Path(os.getenv("RESULTATS_PATH", str(MODELS_DIR / "resultats_comparaison.json")))
+    chemin_resultats.write_text(json.dumps(resultat, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    # ---------- Activation (seulement si demandée) ----------
-    if args.activer and decision and decision != actuelle:
-        activer(decision, actuelle)
-    elif args.activer:
-        print("\nRien à activer, la version active reste inchangée.")
-
+    
     # 0 = candidate conforme, 1 = échec -> exploitable par la CI
     sys.exit(0 if conforme else 1)
 
