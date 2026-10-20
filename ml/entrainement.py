@@ -208,17 +208,15 @@ meilleur_nom = resultats_df["MAE (minutes)"].idxmin()
 print(f"\nModèle choisi : {meilleur_nom}")
 
 
+
 # ============================================================
-# ENTRAÎNEMENT FINAL SUR TRAIN + VALIDATION
+# RECUPERATION DU MEILLEUR MODELE DEJA ENTRAINE
 # ============================================================
 
-print("\nEntraînement du modèle final...")
+print("\nRécupération du meilleur modèle...")
 
-X_train_val = pd.concat([X_train, X_val])
-y_train_val = pd.concat([y_train, y_val])
+modele_final = models[meilleur_nom]
 
-modele_final = clone(models[meilleur_nom])
-modele_final.fit(X_train_val, y_train_val)
 
 # ============================================================
 # ÉVALUATION FINALE SUR LE TEST
