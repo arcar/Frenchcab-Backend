@@ -1,17 +1,11 @@
 
 import hashlib
 import json
-import sys
-from pathlib import Path
 
 import pytest
 
-
-# Permet d'importer le module ml/publier_modele.py
-DOSSIER_ML = Path(__file__).resolve().parents[1] / "ml"
-sys.path.insert(0, str(DOSSIER_ML))
-
-import publier_modele
+from ml import publier_modele
+from ml import rollback_modele
 
 
 def test_activation_v2(tmp_path, monkeypatch):
@@ -231,8 +225,6 @@ def test_refus_sha256_incorrect(tmp_path, monkeypatch):
 
 def test_rollback_v2_vers_v1(tmp_path, monkeypatch):
 
-    import rollback_modele
-
     # 1. Créer deux versions fictives
     dossier_ml = tmp_path / "ml"
     dossier_modeles = dossier_ml / "modeles"
@@ -319,7 +311,6 @@ def test_rollback_v2_vers_v1(tmp_path, monkeypatch):
 
 def test_rollback_sans_version_precedente(tmp_path, monkeypatch):
 
-    import rollback_modele
 
     # 1. Préparer les dossiers temporaires
     dossier_ml = tmp_path / "ml"
@@ -358,7 +349,6 @@ def test_rollback_sans_version_precedente(tmp_path, monkeypatch):
 
 def test_rollback_modele_non_conforme(tmp_path, monkeypatch):
 
-    import rollback_modele
 
     # 1. Créer les deux modèles fictifs
     dossier_ml = tmp_path / "ml"

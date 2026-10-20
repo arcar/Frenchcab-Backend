@@ -152,13 +152,25 @@ jobs:
                   cat /ml/modeles/resultats_comparaison.json
                 ;;
 
+              
               activer)
-                echo "=== ACTIVATION ==="
+                echo "=== ACTIVATION DU MODELE $VERSION ==="
 
-                # Protection temporaire : ne pas activer
-                # tant que l'integration n'est pas validee.
-                echo "Activation en attente des tests."
-                exit 1
+                docker compose exec -T \
+                  -e ML_DIR=/ml \
+                  -e MODELS_DIR=/ml/modeles \
+                  backend python -m ml.publier_modele \
+                    --version "$VERSION"
+
+                echo "=== REDEMARRAGE DU BACKEND ==="
+
+                docker compose restart backend
+
+                echo "=== VERIFICATION DU MODELE CHARGE ==="
+
+                verifier_api "$VERSION"
+                ;;
+
 
                 # Commandes prevues apres validation :
                 # docker compose exec -T \
@@ -171,12 +183,31 @@ jobs:
                 # verifier_api "$VERSION"
                 ;;
 
+              
               rollback)
-                echo "=== ROLLBACK ==="
+                echo "=== RESTAURATION DU MODELE PRECEDENT ==="
 
-                # Protection temporaire
-                echo "Rollback en attente des tests."
-                exit 1
+                docker compose exec -T \
+                  -e ML_DIR=/ml \
+                  -e MODELS_DIR=/ml/modeles \
+                  backend python -m ml.rollback_modele
+
+                echo "=== REDEMARRAGE DU BACKEND ==="
+
+                docker compose restart backend
+
+                echo "=== LECTURE DE LA VERSION RESTAUREE ==="
+
+                VERSION_RESTAUREE=$(docker compose exec -T \
+                  -e MODELS_DIR=/ml/modeles \
+                  backend python -c \
+                  'import json; print(json.load(open("/ml/modeles/version_active.json"))["version"])')
+
+                echo "Version attendue : $VERSION_RESTAUREE"
+
+                verifier_api "$VERSION_RESTAUREE"
+                ;;
+
 
                 # Commandes prevues apres validation :
                 # docker compose exec -T \
