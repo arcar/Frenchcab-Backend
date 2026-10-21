@@ -192,137 +192,442 @@ Une fois importé, le modèle reste chargé en mémoire dans le processus Python
 
 La route `GET /modele/version` a été ajoutée au code pour afficher la version mémorisée lors du chargement du modèle. Son fonctionnement avec les vrais modèles reste à vérifier sur la VM.
 
-## MLOps — Comparaison, activation et restauration des modèles
-
-### Objectif de la semaine 4
-Le système MLOps doit permettre de comparer deux versions compatibles sur les mêmes données, de contrôler leur qualité avec la MAE, de choisir explicitement une version à utiliser par Frenchcab, puis de revenir à la version précédente si nécessaire.
-
-Il n'est pas nécessaire de réentraîner un modèle à chaque déploiement. Entraînement, évaluation, activation et retour arrière constituent des opérations distinctes.
+## Déploiement CI/CD et MLOPS
 
 ### Architecture CI/CD et MLOps
-|Élément|	Responsabilité|	Déclenchement|
-|-------|-----------------|----------------|
-|ci.yml|	Tests et construction/publication de l'image Docker|	Selon la configuration de la CI|
-|cd.yml|	Connexion SSH à la VM, exécution de deploy.sh, vérification HTTP|	Après une CI réussie lancée manuellement sur dev, selon la condition actuelle|
-|deploy.sh (sur la VM)|	Récupération et démarrage des images avec Docker Compose|	Appelé par la CD|
-|mlops.yml|	Vérification, entraînement, comparaison, activation et rollback|	workflow_dispatch manuel|
 
-La CD ne réentraîne plus automatiquement de modèle et n'active pas automatiquement de candidat. Le workflow MLOps est distinct et utilise la même VM.
+Le projet Frenchcab repose sur trois workflows GitHub Actions distincts :
 
-### Arborescence du stockage MLOps
-Les fichiers persistants de la VM se trouvent sur l'hôte dans `/home/groupe2/frenchcab/ml/`, monté dans le conteneur sous `/ml/`.
+| Élément | Responsabilité | Déclenchement |
+|---|---|---|
+| `ci.yml` | Tests Python, fusion vers `dev`, construction et publication Docker Hub | Automatique lors d'un push, sauf sur `main`, ou manuel |
+| `cd.yml` | Déploiement du backend sur la VM et vérification HTTP | Déclenché explicitement par la CI après publication Docker |
+| `mlops.yml` | Vérification, entraînement, comparaison, initialisation, activation et rollback des modèles | Manuel avec `workflow_dispatch` |
+| `deploy.sh` | Récupération des images et démarrage des conteneurs Docker | Exécuté sur la VM par la CD |
 
-```
-/ml/
-├── modeles/
-│   ├── v1/
-│   │   ├── model.pkl
-│   │   ├── metadata.json
-│   │   └── evaluation_validation.csv
-│   ├── v2/
-│   │   ├── model.pkl
-│   │   ├── metadata.json
-│   │   └── evaluation_validation.csv
-│   ├── resultats_comparaison.json
-│   └── version_active.json
-└── modele_temps_trajet.pkl
-```
-Les dossiers v1, v2, etc. contiennent les versions conservées. `modele_temps_trajet.pkl` est le fichier effectivement utilisé par FastAPI. `version_active.json` conserve les identifiants de la version active et de la précédente. Le rapport `resultats_comparaison.json` contient les métriques d'évaluation calculées par `MLO.py`.
+La **CI/CD** gère le déploiement de l'application. Le **MLOps** gère les modèles de Machine Learning.
 
+Ces deux processus sont séparés : un déploiement applicatif ne provoque ni nouvel entraînement ni activation automatique d'un modèle candidat.
 
-### Évaluation et comparaison — ml/MLO.py
-Les versions sont évaluées à partir du jeu indépendant d'avril 2026 :
-```
-yellow_tripdata_2026-04.parquet
-```
-Le script de comparaison utilise un échantillon reproductible (graine aléatoire fixe) et calcule la MAE en minutes, avec un seuil de qualité fixé à 6 minutes.
+Les workflows CD et MLOps partagent un groupe de concurrence GitHub Actions afin d'éviter deux opérations simultanées sur la VM.
 
-Exemple sur la VM, avec la version v2 comme candidate :
+---
+
+### Fonctionnement de la CI/CD
+
+#### 1. Déclencher la CI
+
+La CI se déclenche automatiquement lorsqu'un commit est envoyé sur une branche autre que `main`, notamment `lola`.
+
+Depuis le PC, dans Git Bash :
+
 ```bash
-docker compose exec -T \
-  -e MODELS_DIR=/ml/modeles \
-  -e EVALUATION_DATA_PATH=/raw_data/yellow_tripdata_2026-04.parquet \
-  backend python /app/ml/MLO.py --candidate v2 --seuil 6
+git add <fichiers_modifies>
+git commit -m "description des modifications"
+git push origin lola
 ```
-Le rapport est enregistré par défaut dans `/ml/modeles/resultats_comparaison.json`. Dans le format transmis, il contient notamment actuelle, candidate, leurs identifiants de version, leurs empreintes SHA-256 abrégées et leurs MAE, ainsi que le jeu évalué et le seuil.
 
-### Activation explicite — ml/publier_modele.py
-Après comparaison, l'activation d'une version est une décision distincte. Le script reçoit explicitement --version et vérifie :
-1. L'existence du fichier `modeles/vN/model.pkl`.
-2. La présence de cette version dans resultats_comparaison.json.
-3. La correspondance de l'empreinte SHA-256 avec le modèle évalué.
-4. Le respect du seuil MAE ≤ 6 minutes.
-5. La cohérence du modèle actuellement en production avec l'état enregistré.
+Cette action déclenche le workflow `CI` sur GitHub Actions.
 
-Commande prévue en local, depuis la racine du backend :
+Le workflow réalise successivement :
+
+1. Installation de Python 3.14 et des dépendances de `requirements-dev.txt`.
+2. Exécution des tests avec `pytest -v`.
+3. Si les tests réussissent sur `lola`, fusion automatique de cette branche dans `dev`.
+4. Déclenchement d'une nouvelle CI sur `dev`.
+5. Construction de l'image Docker du backend.
+6. Publication de l'image sur Docker Hub, avec deux tags :
+   - Le SHA du commit.
+   - `latest`.
+7. Déclenchement explicite du workflow CD avec le SHA de l'image publiée.
+
+La publication Docker ne suffit pas à elle seule pour considérer le déploiement comme réussi : il faut également vérifier le résultat du workflow CD.
+
+#### 2. Déclencher une CI manuellement
+
+Il est également possible de lancer la CI depuis GitHub :
+
+1. Ouvrir le dépôt **Frenchcab-Backend**.
+2. Aller dans l'onglet **Actions**.
+3. Sélectionner le workflow **CI**.
+4. Cliquer sur **Run workflow**.
+5. Choisir la branche `dev`.
+6. Confirmer le lancement.
+
+Une CI exécutée sur `dev` teste le code, construit l'image Docker et déclenche la CD si toutes les étapes réussissent.
+
+#### 3. Déploiement automatique avec `cd.yml`
+
+Après la publication sur Docker Hub, le job `build` de la CI appelle le workflow CD :
+
 ```bash
-python -m ml.publier_modele --version v2
+gh workflow run cd.yml \
+  --repo "${{ github.repository }}" \
+  --ref main \
+  -f image_sha="${GITHUB_SHA}"
 ```
-Commande prévue dans le conteneur sur la VM :
-```bash
-docker compose exec -T \
-  -e ML_DIR=/ml \
-  -e MODELS_DIR=/ml/modeles \
-  backend python -m ml.publier_modele --version v2
-```
-Le script remplace le fichier actif et enregistre le couple version / precedente dans `modeles/version_active.json`. Un redémarrage du backend est ensuite nécessaire pour que les prédictions utilisent le nouveau modèle.
 
-### Retour arrière — ml/rollback_modele.py
-Le rollback lit `modeles/version_active.json`, vérifie la version précédente et restaure son model.pkl en production. Il met ensuite à jour les identifiants actif/précédent. Il ne nécessite pas de nouvel entraînement.
+Le workflow CD utilise `workflow_dispatch` et reçoit le SHA de l'image à déployer.
 
-Commande prévue en local :
-```bash
-python -m ml.rollback_modele
-```
-Commande prévue sur la VM :
-```bash
-docker compose exec -T \
-  -e ML_DIR=/ml \
-  -e MODELS_DIR=/ml/modeles \
-  backend python -m ml.rollback_modele
-```
-Après un rollback, le workflow MLOps doit redémarrer le backend et vérifier la version exposée par `GET /modele/version`.
+Il établit une connexion SSH vers la VM, puis exécute :
 
-### Vérification du modèle chargé par l'API
-La route ajoutée dans main.py est :
+```bash
+cd /home/groupe2/frenchcab
+bash ./deploy.sh
 ```
+
+Le script `deploy.sh` effectue notamment :
+
+```bash
+docker compose pull
+docker compose up -d --remove-orphans
+docker compose ps backend
+```
+
+La CD vérifie ensuite les routes HTTP :
+
+```text
+GET /test
 GET /modele/version
 ```
-Elle renvoie la version mémorisée lors du chargement du modèle par `ml/prediction.py`. La correspondance avec le fichier actif est contrôlée à l'aide de son empreinte SHA-256 lorsque le fichier d'état est présent.
 
-La validation complète reste à réaliser sur la VM : activation de V2, redémarrage, vérification de l'API et d'une prédiction, puis rollback vers V1 et nouvelle vérification.
+La première confirme que le backend répond. La seconde permet de vérifier que l'API du modèle est accessible.
+
+Si une vérification échoue, le workflow CD est signalé en échec.
+
+Le déploiement conserve les fichiers MLOps persistants grâce au volume Docker `/ml`.
+
+#### 4. Suivre une exécution CI/CD
+
+Depuis GitHub, ouvrir :
+
+`Frenchcab-Backend → Actions`
+
+Vérifier les exécutions :
+
+| Workflow | Résultat attendu |
+|---|---|
+| CI sur `lola` | Tests réussis et fusion vers `dev` |
+| CI sur `dev` | Tests, build Docker et publication réussis |
+| Continuous Deployment - Backend | Déploiement sur la VM réussi |
+
+En cas d'erreur, consulter les logs du job concerné.
+
+Le workflow CD peut également être lancé manuellement depuis GitHub Actions, à condition de fournir le SHA d'une image Docker déjà publiée.
+
+---
+
+### Fonctionnement du MLOps
+
+Le workflow `mlops.yml` est indépendant de la CI/CD.
+
+Il permet de gérer plusieurs versions du modèle de prédiction de durée des trajets, sans modifier le code applicatif.
+
+#### Lancer le MLOps depuis GitHub Actions
+
+1. Ouvrir **Frenchcab-Backend** sur GitHub.
+2. Aller dans **Actions**.
+3. Sélectionner **MLOps - Frenchcab**.
+4. Cliquer sur **Run workflow**.
+5. Sélectionner la branche `main`.
+6. Choisir l'opération souhaitée.
+7. Renseigner les versions de référence et candidate.
+8. Confirmer le lancement.
+
+Les paramètres disponibles sont :
+
+| Paramètre | Description | Exemple |
+|---|---|---|
+| `operation` | Opération MLOps à exécuter | `pipeline` |
+| `version` | Version candidate | `v2` |
+| `version_actuelle` | Version de référence | `v1` |
+
+#### Opérations disponibles
+
+| Opération | Fonction |
+|---|---|
+| `pipeline` | Vérifie les fichiers, compare les modèles, applique les critères de qualité et initialise ou active une version si les conditions sont réunies |
+| `verifier` | Liste les versions disponibles et affiche la version active |
+| `entrainer` | Exécute le script d'entraînement sans activation automatique |
+| `comparer` | Compare les performances de deux versions |
+| `initialiser` | Initialise V1 lors de la première mise en service |
+| `activer` | Active explicitement une version après vérification des critères |
+| `rollback` | Restaure la version précédente |
+
+L'opération recommandée pour exécuter la chaîne de validation est `pipeline`.
+
+Le rollback reste une opération distincte, déclenchée manuellement en cas de besoin.
+
+#### Déroulement du pipeline MLOps
+
+Lorsqu'on sélectionne `pipeline`, GitHub Actions exécute automatiquement les étapes suivantes sur la VM :
+
+1. Vérification de la présence des modèles et du fichier d'évaluation.
+2. Évaluation des versions sur le même jeu de données.
+3. Calcul des MAE et génération du rapport.
+4. Vérification du seuil de qualité : **MAE ≤ 6 minutes**.
+5. Comparaison de la MAE du candidat avec celle du modèle de référence.
+6. Initialisation de V1 si aucune version n'est active, ou promotion du candidat si les critères sont satisfaits.
+7. Redémarrage du backend lorsqu'une version est activée.
+8. Vérification de la version chargée par l'API.
+
+La candidate n'est promue automatiquement que si elle est conforme et si sa MAE est inférieure ou égale à celle du modèle de référence.
+
+Lors de la toute première exécution, le pipeline initialise uniquement V1, sans activer immédiatement la candidate.
+
+**Le pipeline est automatisé dans son exécution, mais son déclenchement reste manuel avec `Run workflow`.**
+
+---
+
+### Arborescence du stockage MLOps
+
+Les fichiers persistants sont stockés sur la VM :
+
+```text
+/home/groupe2/frenchcab/ml/
+```
+
+Ils sont accessibles depuis le conteneur Docker sous :
+
+```text
+/ml/
+```
+
+Arborescence :
+
+```text
+/ml/
+└── modeles/
+    ├── v1/
+    │   ├── model.pkl
+    │   ├── metadata.json
+    │   └── evaluation_validation.csv
+    ├── v2/
+    │   ├── model.pkl
+    │   ├── metadata.json
+    │   └── evaluation_validation.csv
+    ├── historique_rapports/
+    │   └── ...
+    ├── resultats_comparaison.json
+    └── version_active.json
+```
+
+Chaque dossier `vN` conserve un modèle et ses métadonnées.
+
+Le fichier `version_active.json` indique la version active, la version précédente, ainsi que l'empreinte SHA-256 du modèle actif.
+
+Les scripts d'activation et de rollback mettent à jour cet état sans recopier les fichiers `model.pkl`.
+
+L'API sélectionne le modèle à partir de cet état et vérifie son empreinte lors du chargement.
+
+---
+
+### Évaluation et comparaison — `ml/MLO.py`
+
+Les modèles sont évalués à partir du jeu indépendant d'avril 2026 :
+
+```text
+/raw_data/yellow_tripdata_2026-04.parquet
+```
+
+La comparaison utilise un échantillon reproductible de 100 000 trajets et calcule la MAE en minutes.
+
+Le seuil de qualité est fixé à **6 minutes**.
+
+La comparaison est normalement exécutée via l'opération `pipeline` ou `comparer` du workflow GitHub Actions.
+
+Pour une exécution directe sur la VM :
+
+```bash
+cd /home/groupe2/frenchcab
+
+docker compose exec -T backend python -m ml.MLO \
+  --actuelle v1 \
+  --candidate v2 \
+  --seuil 6 \
+  --donnees /raw_data/yellow_tripdata_2026-04.parquet
+```
+
+Le rapport principal est enregistré dans :
+
+```text
+/ml/modeles/resultats_comparaison.json
+```
+
+Il contient les versions évaluées, leurs empreintes SHA-256 abrégées, leurs MAE, le nom du jeu de données, le nombre de trajets et le seuil retenu.
+
+Une copie horodatée est également conservée dans `historique_rapports/`.
+
+#### Résultats de référence
+
+Lors de la validation du 21 octobre 2026 :
+
+| Modèle | Algorithme | MAE | Conformité |
+|---|---|---|---|
+| V1 | Random Forest | 4,63 min | Conforme |
+| V2 | Random Forest | 4,78 min | Conforme |
+
+Les deux modèles respectent le seuil de qualité, mais V1 présente une MAE légèrement inférieure.
+
+Le pipeline refuse donc la promotion automatique de V2 selon la règle de performance retenue.
+
+---
+
+### Activation d'un modèle — `ml/publier_modele.py`
+
+L'activation est gérée par le workflow MLOps.
+
+Le script vérifie notamment :
+
+1. L'existence du modèle à activer.
+2. Sa présence dans le rapport de comparaison.
+3. La correspondance de l'empreinte SHA-256.
+4. Le respect du seuil MAE.
+5. La cohérence de la version active enregistrée.
+
+Initialisation de V1 dans le conteneur :
+
+```bash
+docker compose exec -T backend \
+  python -m ml.publier_modele \
+  --version v1 \
+  --initialiser
+```
+
+Activation ultérieure de V2 :
+
+```bash
+docker compose exec -T backend \
+  python -m ml.publier_modele \
+  --version v2
+```
+
+Ces commandes sont exécutées automatiquement par les opérations correspondantes du workflow MLOps.
+
+Après une activation, le workflow redémarre le backend :
+
+```bash
+docker compose restart backend
+```
+
+Puis il contrôle la version exposée par l'API.
+
+---
+
+### Retour arrière — `ml/rollback_modele.py`
+
+Le rollback permet de restaurer la version précédemment active sans réentraîner le modèle.
+
+Il lit `version_active.json`, vérifie la version précédente et met à jour l'état d'activation.
+
+L'opération est accessible depuis GitHub Actions :
+
+`Actions → MLOps - Frenchcab → Run workflow → rollback`
+
+La commande équivalente sur la VM est :
+
+```bash
+docker compose exec -T backend \
+  python -m ml.rollback_modele
+```
+
+Le workflow redémarre ensuite le conteneur et vérifie que l'API utilise la version restaurée.
+
+Le rollback ne peut pas être exécuté si aucune version précédente n'est enregistrée.
+
+---
+
+### Vérification de la version active par l'API
+
+Une route spécifique est disponible :
+
+```http
+GET /modele/version
+```
+
+Elle permet de consulter la version du modèle chargée par FastAPI.
+
+Après l'activation ou le rollback, le workflow MLOps interroge cette route et vérifie que la version renvoyée correspond à celle attendue.
+
+Le chargement du modèle s'appuie également sur une vérification SHA-256 afin de détecter une différence entre le fichier `model.pkl` et la version enregistrée.
+
+---
 
 ### Compatibilité développement / production
-Variable	Utilisation	Exemple sur la VM :
 
-- **ML_DIR**	Racine du stockage ML `/ml`
-- **MODELS_DIR**	Dossiers de versions et fichiers de suivi	`/ml/modeles`
-- **MODEL_PATH**	Modèle utilisé par FastAPI	`/ml/modele_temps_trajet.pkl`
-- **EVALUATION_DATA_PATH**	Données indépendantes d'évaluation	`/raw_data/yellow_tripdata_2026-04.parquet`
-- Les scripts de gestion des modèles utilisent des chemins fondés sur __file__ par défaut en local et des variables d'environnement dans Docker.
+| Variable ou chemin | Utilisation | Valeur sur la VM |
+|---|---|---|
+| `ML_DIR` | Racine du stockage ML | `/ml` |
+| `MODELS_DIR` | Répertoire des versions | `/ml/modeles` |
+| `EVALUATION_DATA_PATH` | Fichier Parquet d'évaluation, si utilisé par le script | `/raw_data/yellow_tripdata_2026-04.parquet` |
+| `version_active.json` | Référence du modèle actif | `/ml/modeles/version_active.json` |
 
-Aucun fichier .env Python supplémentaire n'est obligatoire ; os.getenv() ne lit pas automatiquement un fichier .env.
+Les modèles sont stockés indépendamment des images Docker, ce qui permet de mettre à jour le backend sans écraser les fichiers ML.
+
+Les modèles V1 et V2 ont été entraînés avec **scikit-learn 1.9.0**.
+
+La version de scikit-learn installée dans l'image Docker a été fixée à :
+
+```text
+scikit-learn==1.9.0
+```
+
+Les dépendances de développement sont définies dans `requirements-dev.txt`, qui réutilise celles de production grâce à :
+
+```text
+-r requirements.txt
+```
+
+---
 
 ### Tests automatisés
-Les tests dédiés à la gestion des modèles se trouvent dans `tests/test_gestion_modele.py`. Ils ont été exécutés avec des fichiers fictifs isolés par **pytest** et **tmp_path**, sans vrai entraînement :
-|Test|	Résultat obtenu|
-|----|------------------|
-|Activation de V2 et conservation de V1|	Réussi|
-|Refus d'une MAE supérieure à 6 minutes|	Réussi|
-|Refus d'une empreinte SHA-256 incorrecte|	Réussi|
-|Rollback de V2 vers V1|	Réussi|
-|Refus d'un rollback sans version précédente|	Réussi|
-|Refus du rollback vers un modèle non conforme|	Réussi|
 
-Exécution depuis la racine du backend :
+Les tests de gestion des modèles se trouvent dans :
+
+```text
+tests/test_gestion_modele.py
+```
+
+Ils utilisent notamment `pytest` et `tmp_path` pour vérifier la logique de gestion des versions avec des fichiers temporaires, sans entraîner de vrais modèles.
+
+Les scénarios comprennent :
+
+- Activation d'une nouvelle version.
+- Refus d'un modèle dépassant le seuil MAE.
+- Refus d'une empreinte SHA-256 incorrecte.
+- Retour arrière vers la version précédente.
+- Refus d'un rollback sans version précédente.
+- Refus d'un rollback vers un modèle non conforme.
+
+Exécution locale :
+
 ```bash
 python -m pytest tests/test_gestion_modele.py -v
 ```
-**Bilan** : 6 tests réussis lors de l'exécution locale communiquée. Les tests valident la logique de fichiers et les refus attendus ; ils ne remplacent pas les tests d'intégration avec de vrais modèles, le redémarrage Docker ou le contrôle de la prédiction FastAPI.
+
+Ces tests sont également exécutés dans le cadre de la CI grâce à la commande :
+
+```bash
+pytest -v
+```
+
+Ils vérifient la logique des scripts, mais ne remplacent pas les contrôles d'intégration effectués sur la VM.
+
+---
 
 ### État d'avancement
-Développé et testé localement : scripts d'activation et de rollback, tests unitaires de gestion des versions, correction des imports du package ml.
 
-Préparé ou en cours d'intégration : workflow manuel mlops.yml, identification de la version par FastAPI, format final du rapport de comparaison et comparaison explicite V1/V2.
+**CI/CD : opérationnelle.**
 
-À valider avant la recette croisée : présence de deux modèles réellement distincts sur la VM, comparaison avec le rapport définitif, protection contre les opérations simultanées et interruptions brutales, activation V1 → V2 → V1 avec redémarrage et vérification des prédictions, puis vérification globale de CI/CD et HTTPS.
+La chaîne automatique depuis `lola` vers `dev`, Docker Hub et la VM a été validée. Le déclenchement explicite de la CD utilise le SHA de l'image Docker publiée.
+
+**MLOps : pipeline opérationnel.**
+
+Le pipeline MLOps a été exécuté avec succès depuis GitHub Actions : détection des modèles, comparaison sur 100 000 trajets, décision de qualité, initialisation de V1, redémarrage Docker et vérification HTTP.
+
+**Version active : V1.**
+
+Le modèle V1 a été initialisé et reconnu par l'API. V2 reste disponible comme candidate, mais n'a pas été promue automatiquement car sa MAE est légèrement supérieure.
+
+**Reste à valider :** 
+Le MLOps reste déclenché manuellement depuis GitHub Actions ; aucun entraînement périodique ni détection automatique d'un nouveau modèle n'est actuellement configuré.
