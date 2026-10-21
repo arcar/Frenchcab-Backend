@@ -53,10 +53,10 @@ jobs:
           VERSION_ACTUELLE: ${{ inputs.version_actuelle }}
 
         with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.VM_SSH_KEY }}
-          port: ${{ secrets.VM_SSH_PORT }}
+          with:
+          host: ${{ vars.VM_HOST }}
+          username: ${{ vars.VM_USER }}
+          password: ${{ secrets.VM_PASSWORD }}
           envs: OPERATION,VERSION,VERSION_ACTUELLE
           command_timeout: 110m
 
