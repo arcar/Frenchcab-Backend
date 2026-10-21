@@ -1,81 +1,99 @@
 
 name: Continuous Deployment - Backend
 
+# Déclenchement explicite depuis ci.yml
+# après réussite des tests et publication Docker Hub.
 on:
-  workflow_run:
-    workflows:
-      - CI
-    types:
-      - completed
-    branches:
-      - dev
+  workflow_dispatch:
+    inputs:
+      image_sha:
+        description: "SHA du commit correspondant à l'image Docker"
+        required: true
+        type: string
 
 permissions:
   contents: read
 
-# Eviter deux operations simultanees sur la VM
+# Empêche plusieurs déploiements ou opérations MLOps
+# simultanés sur la VM.
 concurrency:
   group: frenchcab-backend-production
   cancel-in-progress: false
 
 jobs:
   deploy:
-    # Conserver le declenchement existant :
-    # CI reussie et lancee manuellement sur dev
-    if: >-
-      github.event.workflow_run.conclusion == 'success'
-      && github.event.workflow_run.event == 'workflow_dispatch'
-      && github.event.workflow_run.head_branch == 'dev'
-
+    name: Déploiement du backend sur la VM
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
-      - name: Deployer Frenchcab sur la VM
+      - name: Déployer Frenchcab sur la VM
         uses: appleboy/ssh-action@v1
 
         env:
-          BACKEND_IMAGE: ${{ vars.DOCKERHUB_USERNAME }}/frenchcab-backend:${{ github.event.workflow_run.head_sha }}
+          BACKEND_IMAGE: ${{ vars.DOCKERHUB_USERNAME }}/frenchcab-backend:${{ inputs.image_sha }}
 
         with:
           host: ${{ vars.VM_HOST }}
           username: ${{ vars.VM_USER }}
           password: ${{ secrets.VM_PASSWORD }}
+
           envs: BACKEND_IMAGE
           command_timeout: 15m
 
           script: |
             set -eu
 
-            cd /home/groupe2/frenchcab
-
             echo "=== DEPLOIEMENT DOCKER ==="
             echo "Image backend : $BACKEND_IMAGE"
 
-            # Script de deploiement deja present sur la VM
+            cd /home/groupe2/frenchcab
+
+            # Déployer l'image exacte publiée par la CI
             bash ./deploy.sh
 
             echo "=== VERIFICATION DU BACKEND ==="
 
-            # Attendre que FastAPI soit pret apres
-            # le demarrage ou le rechargement du modele.
             backend_pret=0
 
             for tentative in $(seq 1 20); do
+
               if curl -fsS --max-time 5 \
                 http://127.0.0.1:3001/test; then
+
                 backend_pret=1
                 break
+
               fi
 
               echo "Backend indisponible - tentative $tentative/20"
               sleep 3
+
             done
 
             if [ "$backend_pret" -ne 1 ]; then
-              echo "ERREUR : le backend ne repond pas."
+
+              echo "ERREUR : le backend ne répond pas."
+
               docker compose ps
+
               docker compose logs --tail=50 backend
+
+              exit 1
+            fi
+
+            echo ""
+            echo "=== VERIFICATION DU MODELE ACTIF ==="
+
+            # Vérification complémentaire :
+            # le déploiement doit conserver la version ML active.
+            if ! curl -fsS --max-time 15 \
+              http://127.0.0.1:3001/modele/version; then
+
+              echo "ERREUR : impossible de vérifier le modèle actif."
+
+              docker compose logs --tail=50 backend
+
               exit 1
             fi
 
