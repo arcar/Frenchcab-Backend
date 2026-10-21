@@ -18,15 +18,16 @@ permissions:
 
 jobs:
 
-  # =====================================================
-  # 1. TESTS DU BACKEND
-  # =====================================================
+  # ==========================================
+  # 1. TESTS
+  # ==========================================
 
   test:
+    name: Tests Python
     runs-on: ubuntu-latest
 
     steps:
-      - name: Récupérer le code
+      - name: Récupérer le dépôt
         uses: actions/checkout@v4
 
       - name: Installer Python
@@ -39,15 +40,15 @@ jobs:
       - name: Installer les dépendances
         run: pip install -r requirements-dev.txt
 
-      - name: Lancer les tests
+      - name: Exécuter les tests
         run: pytest -v
 
-  # =====================================================
-  # 2. FUSION AUTOMATIQUE DANS DEV
-  # =====================================================
+  # ==========================================
+  # 2. FUSION AUTOMATIQUE VERS DEV
+  # ==========================================
 
   merge-dev:
-    name: Fusion automatique dans dev
+    name: Fusion automatique vers dev
 
     if: >-
       github.event_name == 'push'
@@ -65,34 +66,40 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - name: Récupérer dev
+      - name: Récupérer la branche dev
         uses: actions/checkout@v4
         with:
           ref: dev
           fetch-depth: 0
 
-      - name: Merger la branche dans dev
+      - name: Fusionner la branche source dans dev
         id: merge
         env:
-          BRANCHE: ${{ github.ref_name }}
-          SHA: ${{ github.sha }}
+          SOURCE_BRANCH: ${{ github.ref_name }}
         run: |
-          if git merge-base --is-ancestor "$SHA" HEAD; then
-            echo "Déjà présent dans dev, rien à merger"
-            echo "merged=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          set -euo pipefail
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git merge --no-ff "$SHA" -m "<chores> merge auto de $BRANCHE dans dev"
+          git fetch origin "$SOURCE_BRANCH" dev
+
+          git checkout dev
+
+          if git merge-base --is-ancestor "origin/$SOURCE_BRANCH" HEAD; then
+            echo "Aucun nouveau commit à fusionner."
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git merge --no-ff \
+            "origin/$SOURCE_BRANCH" \
+            -m "Merge branch '$SOURCE_BRANCH' into dev"
+
           git push origin dev
 
           echo "merged=true" >> "$GITHUB_OUTPUT"
 
-      # Un push avec GITHUB_TOKEN ne relance pas automatiquement
-      # les workflows. Nous déclenchons donc la CI sur dev.
       - name: Relancer la CI sur dev
         if: steps.merge.outputs.merged == 'true'
         env:
@@ -102,9 +109,9 @@ jobs:
             --repo "${{ github.repository }}" \
             --ref dev
 
-  # =====================================================
-  # 3. BUILD ET PUBLICATION DE L'IMAGE DOCKER
-  # =====================================================
+  # ==========================================
+  # 3. BUILD ET PUBLICATION DOCKER HUB
+  # ==========================================
 
   build:
     name: Build et publication Docker Hub
@@ -116,24 +123,50 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: read
+      actions: write
+
     steps:
-      - name: Récupérer le code
+      - name: Récupérer le dépôt
         uses: actions/checkout@v4
 
-      - name: Se connecter à Docker Hub
+      - name: Connexion à Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Construire l'image backend
+      - name: Construire l'image Docker
         run: |
           docker build \
-            -t ${{ vars.DOCKERHUB_USERNAME }}/frenchcab-backend:${{ github.sha }} \
-            -t ${{ vars.DOCKERHUB_USERNAME }}/frenchcab-backend:latest \
+            -t "${{ vars.DOCKERHUB_USERNAME }}/frenchcab-backend:${{ github.sha }}" \
+            -t "${{ vars.DOCKERHUB_USERNAME }}/frenchcab-backend:latest" \
             .
 
-      - name: Publier l'image sur Docker Hub
+      - name: Publier l'image avec le SHA
         run: |
-          docker push ${{ vars.DOCKERHUB_USERNAME }}/frenchcab-backend:${{ github.sha }}
-          docker push ${{ vars.DOCKERHUB_USERNAME }}/frenchcab-backend:latest
+          docker push \
+            "${{ vars.DOCKERHUB_USERNAME }}/frenchcab-backend:${{ github.sha }}"
+
+      - name: Publier l'image latest
+        run: |
+          docker push \
+            "${{ vars.DOCKERHUB_USERNAME }}/frenchcab-backend:latest"
+
+      # ========================================
+      # 4. DECLENCHEMENT EXPLICITE DE LA CD
+      # ========================================
+
+      - name: Déclencher la CD après publication Docker
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Image publiée : ${{ vars.DOCKERHUB_USERNAME }}/frenchcab-backend:${GITHUB_SHA}"
+
+          gh workflow run cd.yml \
+            --repo "${{ github.repository }}" \
+            --ref main \
+            -f image_sha="${GITHUB_SHA}"
+
+          echo "Demande de déclenchement de la CD envoyée."
