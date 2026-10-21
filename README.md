@@ -162,13 +162,26 @@ Chaque dossier `vN` contient le **modèle entraîné**, ses **métadonnées** et
 
 Depuis la racine du backend en développement :
 ```bash
-python ml/entrainement.py
+python -m ml.entrainement
 ```
 Depuis la VM, dans le dossier contenant compose.yml :
 ```bash
 docker compose exec -T -e MODELS_DIR=/ml/modeles backend python /app/ml/entrainement.py
 ```
 Attention : deux noms de versions différents ne garantissent pas deux modèles différents si les données, paramètres et graines aléatoires sont identiques. Vérifier les empreintes SHA-256 avant la démonstration V1/V2.
+
+Pour avoir deux versions différentes, pour le deuxième entrainement changer les données `n_estimators`, `max_depth` sur le modèle de `RadomForestRegressor`. Attention il ne fait pas changer `random_state` entre deux versions où la reproductivité ne marche plus et donc les deux modèles ne sont plus comparables. Exemple de changement pour la V2 :
+```python
+"Random Forest": Pipeline([
+        ("prep", clone(preprocessor)),
+        ("reg", RandomForestRegressor(
+            n_estimators=30,
+            max_depth=10,
+            random_state=42,
+            n_jobs=-1
+        ))
+    ])
+```
 
 ### Prédiction
 Le module `ml/prediction.py` charge le modèle de production indiqué par **MODEL_PATH** :
