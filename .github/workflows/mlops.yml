@@ -9,13 +9,14 @@ on:
         required: true
         type: choice
         options:
+          - pipeline
           - verifier
           - entrainer
           - comparer
           - initialiser
           - activer
           - rollback
-        default: verifier
+        default: pipeline
 
       version:
         description: "Version candidate à comparer ou à activer"
@@ -32,8 +33,8 @@ on:
 permissions:
   contents: read
 
-# Évite deux opérations MLOps concurrentes.
-# Même groupe que le workflow CD.
+# Empêche une CD et une opération MLOps
+# de modifier la production simultanément.
 concurrency:
   group: frenchcab-backend-production
   cancel-in-progress: false
@@ -47,6 +48,7 @@ jobs:
     steps:
       - name: Exécuter l'opération MLOps sur la VM
         uses: appleboy/ssh-action@v1
+
         env:
           OPERATION: ${{ inputs.operation }}
           VERSION: ${{ inputs.version }}
@@ -71,14 +73,19 @@ jobs:
             echo "Version référence : $VERSION_ACTUELLE"
             echo "=================================="
 
-            # -------------------------------------------
+            # ==========================================
             # CONFIGURATION
-            # -------------------------------------------
+            # ==========================================
 
             ML_DIR=/ml
             MODELS_DIR=/ml/modeles
+            DONNEES=/raw_data/yellow_tripdata_2026-04.parquet
+            SEUIL=6
 
-            # Vérification des identifiants de version
+            # ==========================================
+            # VALIDATION DES PARAMETRES
+            # ==========================================
+
             printf '%s\n' "$VERSION" |
               grep -Eq '^v[1-9][0-9]*$' || {
                 echo "Version candidate invalide."
@@ -91,9 +98,9 @@ jobs:
                 exit 1
               }
 
-            # -------------------------------------------
-            # VÉRIFICATION API
-            # -------------------------------------------
+            # ==========================================
+            # FONCTIONS COMMUNES
+            # ==========================================
 
             verifier_api() {
               attendu="$1"
@@ -102,17 +109,21 @@ jobs:
               echo "Vérification de l'API pour $attendu"
 
               while [ "$tentative" -le 20 ]; do
+
                 reponse=$(curl -fsS \
                   http://127.0.0.1:3001/modele/version \
                   2>/dev/null || true)
 
                 if printf '%s' "$reponse" |
                     grep -Eq "\"version\"[[:space:]]*:[[:space:]]*\"$attendu\""; then
+
                   echo "API OK - Modèle chargé : $attendu"
                   return 0
+
                 fi
 
                 echo "Tentative $tentative/20"
+
                 sleep 3
                 tentative=$((tentative + 1))
               done
@@ -121,20 +132,201 @@ jobs:
               return 1
             }
 
-            # -------------------------------------------
+            verifier_fichiers() {
+              echo "=== VERIFICATION DES FICHIERS ==="
+
+              docker compose exec -T backend \
+                test -f "$MODELS_DIR/$VERSION_ACTUELLE/model.pkl"
+
+              docker compose exec -T backend \
+                test -f "$MODELS_DIR/$VERSION/model.pkl"
+
+              docker compose exec -T backend \
+                test -f "$DONNEES"
+
+              echo "Modèles et données présents."
+            }
+
+            comparer_modeles() {
+              echo "=== COMPARAISON DES MODELES ==="
+
+              if [ "$VERSION_ACTUELLE" = "$VERSION" ]; then
+                echo "Les versions doivent être différentes."
+                exit 1
+              fi
+
+              docker compose exec -T \
+                -e MODELS_DIR="$MODELS_DIR" \
+                backend python -m ml.MLO \
+                  --actuelle "$VERSION_ACTUELLE" \
+                  --candidate "$VERSION" \
+                  --seuil "$SEUIL" \
+                  --donnees "$DONNEES"
+
+              echo "=== RAPPORT DE COMPARAISON ==="
+
+              docker compose exec -T backend \
+                cat "$MODELS_DIR/resultats_comparaison.json"
+            }
+
+            version_active() {
+              docker compose exec -T backend python -c '
+            import json
+            from pathlib import Path
+
+            chemin = Path("/ml/modeles/version_active.json")
+            etat = json.loads(chemin.read_text())
+            print(etat["version"])
+            '
+            }
+
+            decision_promotion() {
+              docker compose exec -T backend python -c '
+            import json
+            from pathlib import Path
+
+            chemin = Path("/ml/modeles/resultats_comparaison.json")
+            rapport = json.loads(chemin.read_text())
+
+            actuel = rapport["actuelle"]
+            candidat = rapport["candidate"]
+
+            if (
+                actuel["conforme"]
+                and candidat["conforme"]
+                and candidat["mae_minutes"] <= actuel["mae_minutes"]
+            ):
+                print("ACCEPTE")
+            else:
+                print("REFUS")
+            '
+            }
+
+            initialiser_v1() {
+              echo "=== INITIALISATION DE V1 ==="
+
+              docker compose exec -T \
+                -e ML_DIR="$ML_DIR" \
+                -e MODELS_DIR="$MODELS_DIR" \
+                backend python -m ml.publier_modele \
+                  --version v1 \
+                  --initialiser
+
+              echo "=== REDEMARRAGE DU BACKEND ==="
+
+              docker compose restart backend
+
+              verifier_api "v1"
+
+              echo "V1 initialisée avec succès."
+            }
+
+            activer_version() {
+              version_cible="$1"
+
+              echo "=== ACTIVATION DE $version_cible ==="
+
+              docker compose exec -T \
+                -e ML_DIR="$ML_DIR" \
+                -e MODELS_DIR="$MODELS_DIR" \
+                backend python -m ml.publier_modele \
+                  --version "$version_cible"
+
+              echo "=== REDEMARRAGE DU BACKEND ==="
+
+              docker compose restart backend
+
+              verifier_api "$version_cible"
+
+              echo "Version $version_cible activée avec succès."
+            }
+
+            # ==========================================
             # CONTROLE DU CONTENEUR
-            # -------------------------------------------
+            # ==========================================
+
+            echo "=== ETAT DU BACKEND ==="
 
             docker compose ps backend
 
             docker compose exec -T backend \
               test -d /app/ml
 
-            # -------------------------------------------
-            # OPERATIONS
-            # -------------------------------------------
+            # ==========================================
+            # OPERATIONS MLOPS
+            # ==========================================
 
             case "$OPERATION" in
+
+              # ----------------------------------------
+              # PIPELINE COMPLET
+              # ----------------------------------------
+
+              pipeline)
+                echo "=== PIPELINE MLOPS ==="
+
+                verifier_fichiers
+
+                comparer_modeles
+
+                echo "=== CONTROLE QUALITE ==="
+
+                DECISION=$(decision_promotion)
+
+                echo "Décision pour $VERSION : $DECISION"
+
+                echo "=== VERIFICATION VERSION ACTIVE ==="
+
+                if ! docker compose exec -T backend \
+                    test -f "$MODELS_DIR/version_active.json"; then
+
+                  echo "Aucune version initialisée."
+
+                  if [ "$VERSION_ACTUELLE" != "v1" ]; then
+                    echo "Initialisation impossible : version attendue v1."
+                    exit 1
+                  fi
+
+                  # Première mise en service :
+                  # initialisation de V1 uniquement.
+                  initialiser_v1
+
+                  echo "Le candidat n'est pas activé lors de la première initialisation."
+
+                else
+
+                  ACTIVE=$(version_active)
+
+                  echo "Version active : $ACTIVE"
+
+                  if [ "$ACTIVE" != "$VERSION_ACTUELLE" ]; then
+                    echo "ERREUR : version active différente de la référence."
+                    echo "Active : $ACTIVE"
+                    echo "Référence : $VERSION_ACTUELLE"
+                    exit 1
+                  fi
+
+                  if [ "$DECISION" = "ACCEPTE" ]; then
+
+                    echo "Candidat accepté."
+
+                    activer_version "$VERSION"
+
+                  else
+
+                    echo "Candidat refusé : conservation de $ACTIVE."
+
+                    verifier_api "$ACTIVE"
+
+                  fi
+                fi
+
+                echo "=== PIPELINE MLOPS TERMINE ==="
+                ;;
+
+              # ----------------------------------------
+              # VERIFIER
+              # ----------------------------------------
 
               verifier)
                 echo "=== VERSIONS DISPONIBLES ==="
@@ -162,6 +354,10 @@ jobs:
                 fi
                 ;;
 
+              # ----------------------------------------
+              # ENTRAINER
+              # ----------------------------------------
+
               entrainer)
                 echo "=== ENTRAINEMENT ==="
 
@@ -173,60 +369,42 @@ jobs:
                 echo "Aucune activation automatique."
                 ;;
 
-                comparer)
-                echo "=== COMPARAISON ==="
+              # ----------------------------------------
+              # COMPARER
+              # ----------------------------------------
 
-                if [ "$VERSION_ACTUELLE" = "$VERSION" ]; then
-                  echo "Les versions à comparer doivent être différentes."
+              comparer)
+                verifier_fichiers
+                comparer_modeles
+                ;;
+
+              # ----------------------------------------
+              # INITIALISER V1
+              # ----------------------------------------
+
+              initialiser)
+                if docker compose exec -T backend \
+                    test -f "$MODELS_DIR/version_active.json"; then
+
+                  echo "Une version est déjà initialisée."
+                  echo "Initialisation refusée."
                   exit 1
                 fi
 
-                docker compose exec -T \
-                  -e MODELS_DIR="$MODELS_DIR" \
-                  backend python -m ml.MLO \
-                    --actuelle "$VERSION_ACTUELLE" \
-                    --candidate "$VERSION" \
-                    --seuil 6 \
-                    --donnees /raw_data/yellow_tripdata_2026-04.parquet
-
-                echo "=== RAPPORT DE COMPARAISON ==="
-
-                docker compose exec -T backend \
-                  cat "$MODELS_DIR/resultats_comparaison.json"
+                initialiser_v1
                 ;;
 
-              initialiser)
-                echo "=== INITIALISATION DE V1 ==="
-
-                docker compose exec -T \
-                  -e ML_DIR="$ML_DIR" \
-                  -e MODELS_DIR="$MODELS_DIR" \
-                  backend python -m ml.publier_modele \
-                    --version v1 \
-                    --initialiser
-
-                echo "=== REDEMARRAGE DU BACKEND ==="
-
-                docker compose restart backend
-
-                verifier_api "v1"
-                ;;
+              # ----------------------------------------
+              # ACTIVER UNE VERSION
+              # ----------------------------------------
 
               activer)
-                echo "=== ACTIVATION DE $VERSION ==="
-
-                docker compose exec -T \
-                  -e ML_DIR="$ML_DIR" \
-                  -e MODELS_DIR="$MODELS_DIR" \
-                  backend python -m ml.publier_modele \
-                    --version "$VERSION"
-
-                echo "=== REDEMARRAGE DU BACKEND ==="
-
-                docker compose restart backend
-
-                verifier_api "$VERSION"
+                activer_version "$VERSION"
                 ;;
+
+              # ----------------------------------------
+              # ROLLBACK
+              # ----------------------------------------
 
               rollback)
                 echo "=== ROLLBACK ==="
@@ -249,7 +427,13 @@ jobs:
                 docker compose restart backend
 
                 verifier_api "$VERSION_RESTAUREE"
+
+                echo "Rollback réussi : $VERSION_RESTAUREE"
                 ;;
+
+              # ----------------------------------------
+              # OPERATION INCONNUE
+              # ----------------------------------------
 
               *)
                 echo "Opération inconnue : $OPERATION"
