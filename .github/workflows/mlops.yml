@@ -53,7 +53,6 @@ jobs:
           VERSION_ACTUELLE: ${{ inputs.version_actuelle }}
 
         with:
-          with:
           host: ${{ vars.VM_HOST }}
           username: ${{ vars.VM_USER }}
           password: ${{ secrets.VM_PASSWORD }}
@@ -174,7 +173,7 @@ jobs:
                 echo "Aucune activation automatique."
                 ;;
 
-              comparer)
+                comparer)
                 echo "=== COMPARAISON ==="
 
                 if [ "$VERSION_ACTUELLE" = "$VERSION" ]; then
@@ -184,11 +183,11 @@ jobs:
 
                 docker compose exec -T \
                   -e MODELS_DIR="$MODELS_DIR" \
-                  -e EVALUATION_DATA_PATH=/raw_data/yellow_tripdata_2026-04.parquet \
                   backend python -m ml.MLO \
                     --actuelle "$VERSION_ACTUELLE" \
                     --candidate "$VERSION" \
-                    --seuil 6
+                    --seuil 6 \
+                    --donnees /raw_data/yellow_tripdata_2026-04.parquet
 
                 echo "=== RAPPORT DE COMPARAISON ==="
 
