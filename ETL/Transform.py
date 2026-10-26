@@ -1,5 +1,5 @@
 from Extract import parquet_df, pd, year, month, dossier_data
-
+import os
 
 
 colonnes_date = ["tpep_pickup_datetime", "tpep_dropoff_datetime"]
@@ -75,7 +75,12 @@ try:
         return df.reset_index(drop=True)
 
     df = transform(parquet_df, year, month)
-    df.to_csv(dossier_data, index=False)
+
+    ruta_csv = os.path.join(
+        dossier_data,
+        f"yellow_tripdata_{year}-{month:02d}_clean.csv"
+    )
+    df.to_csv(ruta_csv, index=False)
     
 except FileNotFoundError:
     print("File not found:", parquet_df)
