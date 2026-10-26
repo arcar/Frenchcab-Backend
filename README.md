@@ -273,6 +273,48 @@ Ce rapport contient les résultats d'évaluation des versions, leurs MAE et leur
 
 Le seuil de qualité est fixé à **6 minutes de MAE**.
 
+### Initialisation du modèle actif — Première installation
+
+Après l'entraînement de V1 et V2, il est nécessaire de comparer les modèles avec `MLO.py` afin de générer `resultats_comparaison.json`.
+
+Une fois le rapport généré, **V1 doit être initialisée pour pouvoir effectuer des prédictions**.
+
+**En local**, depuis la racine de `Frenchcab-Backend` :
+
+```bash
+python -m ml.publier_modele --version v1 --initialiser
+```
+
+**Sur la VM**, depuis `/home/groupe2/frenchcab` :
+
+```bash
+docker compose exec -T \
+  -w /app \
+  -e ML_DIR=/ml \
+  -e MODELS_DIR=/ml/modeles \
+  backend python -m ml.publier_modele \
+  --version v1 \
+  --initialiser
+```
+
+Cette commande vérifie le rapport de comparaison, la qualité du modèle et son empreinte SHA-256, puis crée :
+
+```text
+ml/modeles/version_active.json
+```
+
+Le fichier contient la version active et la référence à la version précédente.
+
+**Cette initialisation ne doit être effectuée qu'une seule fois par environnement.** Pour les activations suivantes, utiliser l'opération `pipeline` ou `activer` du MLOps.
+
+Après initialisation, redémarrer FastAPI pour charger V1, puis vérifier :
+
+```text
+GET /modele/version
+```
+
+Sur la VM, l'opération `pipeline` de GitHub Actions peut effectuer cette initialisation automatiquement si aucune version n'est encore active.
+
 ### Initialisation du premier modèle actif
 
 **Cette étape est obligatoire lors d'une première installation.**
