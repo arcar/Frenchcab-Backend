@@ -127,70 +127,289 @@ Ce qui va créer deux bdd :
 
 ### Objectif
 
-Le modèle de Machine Learning de Frenchcab prédit la durée d'une course de taxi en minutes. La variable cible, `trip_duration_min`, est calculée par différence entre `tpep_dropoff_datetime` et `tpep_pickup_datetime` lors de la préparation des données.
+Le modèle de Machine Learning de Frenchcab prédit la durée d'une course de taxi en minutes.
+
+La variable cible `trip_duration_min` est calculée à partir de la différence entre `tpep_dropoff_datetime` et `tpep_pickup_datetime` lors de la préparation des données.
+
+### Prérequis
+
+Pour utiliser le Machine Learning, il faut disposer :
+
+- De Python et des dépendances du projet.
+- De la base de données décisionnelle `ETL/frenchcab.db`.
+- Des données nécessaires à l'entraînement.
+- Du fichier Parquet d'évaluation `yellow_tripdata_2026-04.parquet`.
+- D'au moins une version de modèle entraînée.
+
+Les modèles et les données volumineuses peuvent ne pas être inclus dans le dépôt Git. Leur présence doit donc être vérifiée avant l'exécution des scripts.
+
+### Installation des dépendances en local
+
+Depuis la racine de `Frenchcab-Backend`, créer un environnement virtuel :
+
+```powershell
+python -m venv .venv
+```
+
+Activer l'environnement sous Windows PowerShell :
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+Installer les dépendances :
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+Pour installer également les dépendances utilisées dans les tests et le développement :
+
+```powershell
+python -m pip install -r requirements-dev.txt
+```
 
 ### Données et préparation
-Les données d'entraînement sont chargées depuis la base décisionnelle SQLite `ETL/frenchcab.db`, accessible dans le conteneur de la VM sous `/app/ETL/frenchcab.db` grâce au montage Docker existant. Le module `ml/preparation.py` prépare les données consommées par `ml/entrainement.py`.
 
-Dans la version d'`entrainement.py` transmise par l'équipe, les variables d'entrée sont :
-- Catégorielles : nom_jour, id_localisation_d, id_localisation_a.
-- Numériques : trip_distance, heure, minute, est_weekend.
+Les données d'entraînement sont chargées depuis la base décisionnelle SQLite :
 
-*Point à vérifier avant la recette : ml/prediction.py transmet encore la variable mois, qui ne figure plus parmi les variables d'entraînement de cette version. Les variables utilisées à l'entraînement et à la prédiction doivent rester cohérentes.*
-
-
-### Entraînement et versions
-Le script `ml/entrainement.py` compare une **régression linéaire (LinearRegression)** et une **forêt aléatoire (RandomForestRegressor)**. Le modèle présentant la meilleure **MAE** sur le jeu de validation est réentraîné sur les ensembles d'entraînement et de validation, puis évalué sur un jeu de test interne.
-
-L'entraînement produit une nouvelle version sans remplacer les versions précédentes :
+```text
+ETL/frenchcab.db
 ```
+
+Dans le conteneur de la VM, cette base est accessible sous :
+
+```text
+/app/ETL/frenchcab.db
+```
+
+Le module `ml/preparation.py` prépare les données nécessaires à `ml/entrainement.py`.
+
+Les variables utilisées par le modèle sont :
+
+| Type | Variables |
+|---|---|
+| Catégorielles | `nom_jour`, `id_localisation_d`, `id_localisation_a` |
+| Numériques | `trip_distance`, `heure`, `minute`, `est_weekend` |
+
+La fonction de prédiction accepte également un paramètre `mois` pour conserver la compatibilité de l'API, mais ce paramètre ne figure pas parmi les variables d'entraînement de cette version.
+
+### Entraînement et création des versions
+
+Le script `ml/entrainement.py` compare une régression linéaire (`LinearRegression`) et une forêt aléatoire (`RandomForestRegressor`).
+
+Le modèle sélectionné est enregistré dans un dossier de version.
+
+Exemple d'arborescence :
+
+```text
 ml/
-├── modeles/
-│   ├── v1/
-│   │   ├── model.pkl
-│   │   ├── metadata.json
-│   │   └── evaluation_validation.csv
-│   └── v2/
-│       ├── model.pkl
-│       ├── metadata.json
-│       └── evaluation_validation.csv
-└── modele_temps_trajet.pkl
+└── modeles/
+    ├── v1/
+    │   ├── model.pkl
+    │   ├── metadata.json
+    │   └── evaluation_validation.csv
+    └── v2/
+        ├── model.pkl
+        ├── metadata.json
+        └── evaluation_validation.csv
 ```
-Chaque dossier `vN` contient le **modèle entraîné**, ses **métadonnées** et les **métriques de validation** des algorithmes comparés. 
 
-**MODELS_DIR** définit le dossier de stockage des versions : `ml/modeles/` par défaut en local et `/ml/modeles/` dans le conteneur de la VM.
+Chaque version conserve son modèle, ses métadonnées et ses métriques d'évaluation.
 
-Depuis la racine du backend en développement :
-```bash
+**En local**, depuis la racine de `Frenchcab-Backend` :
+
+```powershell
 python -m ml.entrainement
 ```
-Depuis la VM, dans le dossier contenant compose.yml :
+
+**Sur la VM**, depuis `/home/groupe2/frenchcab` :
+
 ```bash
-docker compose exec -T -e MODELS_DIR=/ml/modeles backend python /app/ml/entrainement.py
-```
-Attention : deux noms de versions différents ne garantissent pas deux modèles différents si les données, paramètres et graines aléatoires sont identiques. Vérifier les empreintes SHA-256 avant la démonstration V1/V2.
-
-Pour avoir deux versions différentes, pour le deuxième entrainement changer les données `n_estimators`, `max_depth` sur le modèle de `RadomForestRegressor`. Attention il ne fait pas changer `random_state` entre deux versions où la reproductivité ne marche plus et donc les deux modèles ne sont plus comparables. Exemple de changement pour la V2 :
-```python
-"Random Forest": Pipeline([
-        ("prep", clone(preprocessor)),
-        ("reg", RandomForestRegressor(
-            n_estimators=30,
-            max_depth=10,
-            random_state=42,
-            n_jobs=-1
-        ))
-    ])
+docker compose exec -T \
+  -w /app \
+  -e MODELS_DIR=/ml/modeles \
+  backend python -m ml.entrainement
 ```
 
-### Prédiction
-Le module `ml/prediction.py` charge le modèle de production indiqué par **MODEL_PATH** :
-- En local : ml/modele_temps_trajet.pkl par défaut.
-- Sur la VM : /ml/modele_temps_trajet.pkl lorsque MODEL_PATH est configuré dans Docker.
+Il est important d'utiliser `python -m ml.entrainement` plutôt que `python /app/ml/entrainement.py`, afin que Python reconnaisse correctement le package `ml`.
 
-Une fois importé, le modèle reste chargé en mémoire dans le processus Python. Après toute activation ou restauration, FastAPI doit donc être redémarré ou son processus rechargé pour utiliser effectivement la version choisie.
+Pour produire deux modèles différents tout en conservant une comparaison reproductible, les hyperparamètres peuvent être modifiés, notamment `n_estimators` et `max_depth`. Il est recommandé de conserver un `random_state` fixe.
 
-La route `GET /modele/version` a été ajoutée au code pour afficher la version mémorisée lors du chargement du modèle. Son fonctionnement avec les vrais modèles reste à vérifier sur la VM.
+### Comparaison des modèles
+
+L'entraînement ne suffit pas à rendre un modèle actif.
+
+Avant toute initialisation ou activation, il faut générer un rapport de comparaison avec `ml/MLO.py`.
+
+Le script évalue les versions sur le jeu indépendant d'avril 2026 et calcule leurs MAE.
+
+**En local**, depuis la racine du backend, avec le fichier Parquet placé dans `raw_data/` :
+
+```powershell
+python -m ml.MLO --actuelle v1 --candidate v2 --seuil 6 --donnees raw_data/yellow_tripdata_2026-04.parquet
+```
+
+**Sur la VM** :
+
+```bash
+docker compose exec -T \
+  -w /app \
+  -e MODELS_DIR=/ml/modeles \
+  backend python -m ml.MLO \
+  --actuelle v1 \
+  --candidate v2 \
+  --seuil 6 \
+  --donnees /raw_data/yellow_tripdata_2026-04.parquet
+```
+
+Le script génère :
+
+```text
+ml/modeles/resultats_comparaison.json
+```
+
+Ce rapport contient les résultats d'évaluation des versions, leurs MAE et leurs empreintes SHA-256.
+
+Le seuil de qualité est fixé à **6 minutes de MAE**.
+
+### Initialisation du premier modèle actif
+
+**Cette étape est obligatoire lors d'une première installation.**
+
+L'entraînement et la comparaison produisent des modèles et des rapports, mais ne définissent pas automatiquement le modèle actif.
+
+Le script `ml/publier_modele.py` permet d'initialiser V1 et de créer le fichier :
+
+```text
+ml/modeles/version_active.json
+```
+
+Ce fichier indique notamment la version active et son empreinte SHA-256.
+
+**En local**, depuis la racine du backend :
+
+```powershell
+python -m ml.publier_modele --version v1 --initialiser
+```
+
+**Sur la VM** :
+
+```bash
+docker compose exec -T \
+  -w /app \
+  -e ML_DIR=/ml \
+  -e MODELS_DIR=/ml/modeles \
+  backend python -m ml.publier_modele \
+  --version v1 \
+  --initialiser
+```
+
+Le script vérifie la présence du modèle, sa correspondance avec le rapport de comparaison et le respect du seuil de qualité.
+
+Après initialisation, l'arborescence contient :
+
+```text
+ml/
+└── modeles/
+    ├── v1/
+    │   └── model.pkl
+    ├── v2/
+    │   └── model.pkl
+    ├── resultats_comparaison.json
+    └── version_active.json
+```
+
+Le fichier `version_active.json` ne doit pas être créé manuellement : le script d'initialisation assure les vérifications nécessaires.
+
+### Prédiction et version active
+
+Le module `ml/prediction.py` lit `version_active.json` afin de déterminer le modèle à utiliser.
+
+Il charge ensuite le fichier :
+
+```text
+ml/modeles/vN/model.pkl
+```
+
+où `vN` correspond à la version active.
+
+Les emplacements sont configurables avec les variables d'environnement :
+
+| Environnement | `ML_DIR` | `MODELS_DIR` |
+|---|---|---|
+| Local | `ml/` | `ml/modeles/` |
+| VM Docker | `/ml` | `/ml/modeles` |
+
+Sur le PC, les chemins sont déterminés automatiquement à partir du dossier contenant `prediction.py`, sauf si des variables d'environnement les remplacent.
+
+Sur la VM, Docker Compose fournit les chemins des volumes montés.
+
+### Démarrage et vérification de FastAPI en local
+
+Depuis la racine de `Frenchcab-Backend` :
+
+```powershell
+python -m uvicorn main:app --host 127.0.0.1 --port 8000
+```
+
+Documentation interactive :
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+Vérification du modèle actif :
+
+```text
+http://127.0.0.1:8000/modele/version
+```
+
+Si V1 est correctement initialisée :
+
+```json
+{
+  "version": "v1"
+}
+```
+
+Si aucun modèle n'est initialisé, la route renvoie une erreur HTTP 503 avec un message expliquant l'absence de version active.
+
+### Vérification sur la VM
+
+Depuis `/home/groupe2/frenchcab` :
+
+```bash
+curl http://127.0.0.1:3001/modele/version
+```
+
+Le résultat doit indiquer la version active.
+
+Après toute activation ou restauration, le conteneur doit être redémarré pour que FastAPI charge effectivement le modèle sélectionné :
+
+```bash
+docker compose restart backend
+```
+
+### Automatisation avec GitHub Actions
+
+En production, ces opérations peuvent être réalisées directement depuis le workflow **MLOps - Frenchcab**.
+
+Depuis GitHub :
+
+1. Aller dans `Actions`.
+2. Sélectionner `MLOps - Frenchcab`.
+3. Cliquer sur `Run workflow`.
+4. Sélectionner la branche `main`.
+5. Choisir l'opération `pipeline`.
+6. Renseigner la version actuelle et la version candidate.
+7. Lancer le workflow.
+
+Le pipeline vérifie les fichiers, effectue la comparaison et initialise V1 si aucune version n'est active. Lors des exécutions suivantes, il peut promouvoir une candidate conforme et au moins aussi performante que la version de référence.
+
+Les opérations `entrainer`, `comparer`, `initialiser`, `activer` et `rollback` restent également accessibles séparément.
+
+Le workflow MLOps est indépendant de la CI/CD : un déploiement applicatif ne déclenche pas automatiquement un nouvel entraînement.
 
 ## Déploiement CI/CD et MLOPS
 

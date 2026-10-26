@@ -54,13 +54,20 @@ def get_test():
 
 @app.get("/modele/version")
 def get_version_modele():
-    """Retourne la version du modele charge par Frenchcab."""
+    """Retourne la version du modèle chargé par Frenchcab."""
 
-    from ml.prediction import obtenir_version_modele
+    try:
+        from ml.prediction import obtenir_version_modele
 
-    return {
-        "version": obtenir_version_modele()
-    }
+        return {
+            "version": obtenir_version_modele()
+        }
+
+    except FileNotFoundError as erreur:
+        raise HTTPException(
+            status_code=503,
+            detail=str(erreur)
+        ) from erreur
 
 
 @app.get("/zones")
