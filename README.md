@@ -411,6 +411,125 @@ Les opérations `entrainer`, `comparer`, `initialiser`, `activer` et `rollback` 
 
 Le workflow MLOps est indépendant de la CI/CD : un déploiement applicatif ne déclenche pas automatiquement un nouvel entraînement.
 
+### Création d'une nouvelle version de modèle (V3, V4...)
+
+Le script `ml/entrainement.py` possède un système de versionnement automatique grâce à la fonction `prochaine_version()`.
+
+À chaque entraînement, il recherche les versions existantes dans `MODELS_DIR` et crée un nouveau dossier avec le numéro suivant.
+
+Par exemple, si `v1` et `v2` existent déjà, le prochain entraînement produira automatiquement `v3`.
+
+#### 1. Modifier les paramètres du modèle (facultatif)
+
+Avant un nouvel entraînement, il est possible de modifier les hyperparamètres du `RandomForestRegressor` dans `ml/entrainement.py` :
+
+```python
+"Random Forest": Pipeline([
+    ("prep", clone(preprocessor)),
+    ("reg", RandomForestRegressor(
+        n_estimators=40,
+        max_depth=12,
+        random_state=42,
+        n_jobs=-1
+    ))
+])
+```
+
+Cet exemple utilise 40 arbres et une profondeur maximale de 12, contre 30 arbres et une profondeur maximale de 10 pour V2.
+
+Conserver un `random_state` fixe permet de reproduire les expérimentations dans un environnement identique.
+
+**Attention :** changer les paramètres n'assure pas une amélioration des performances. La nouvelle version devra être évaluée.
+
+#### 2. Lancer un nouvel entraînement
+
+**Depuis GitHub Actions (méthode recommandée sur la VM)**
+
+1. Ouvrir le dépôt GitHub `Frenchcab-Backend`.
+2. Aller dans **Actions → MLOps - Frenchcab**.
+3. Cliquer sur **Run workflow**.
+4. Sélectionner la branche `main`.
+5. Choisir l'opération `entrainer`.
+6. Lancer le workflow.
+
+Le script crée automatiquement la prochaine version disponible sur la VM, sans activer le modèle.
+
+Si V1 et V2 sont déjà présents, le dossier suivant est créé :
+
+```text
+/ml/modeles/v3/
+├── model.pkl
+├── metadata.json
+└── evaluation_validation.csv
+```
+
+**En local**, depuis la racine du backend :
+
+```powershell
+python -m ml.entrainement
+```
+
+**Directement sur la VM**, depuis `/home/groupe2/frenchcab` :
+
+```bash
+docker compose exec -T \
+  -w /app \
+  -e MODELS_DIR=/ml/modeles \
+  backend python -m ml.entrainement
+```
+
+La version réellement créée est indiquée dans les logs de fin d'entraînement.
+
+#### 3. Comparer V3 à la version active V1
+
+Une fois V3 créée, retourner dans **Actions → MLOps - Frenchcab → Run workflow**.
+
+Renseigner :
+
+| Paramètre | Valeur |
+|---|---|
+| Branch | `main` |
+| `operation` | `pipeline` |
+| `version` | `v3` |
+| `version_actuelle` | `v1` |
+
+Le pipeline vérifie la présence des fichiers, évalue V1 et V3 sur le jeu indépendant d'avril 2026, calcule leurs MAE et applique les critères de promotion.
+
+La candidate doit respecter le seuil de **6 minutes de MAE** et obtenir une MAE inférieure ou égale à celle de V1 pour être promue automatiquement.
+
+- Si V3 respecte les critères, elle est activée, le backend redémarre et l'API vérifie la version chargée.
+- Si V3 ne respecte pas les critères, V1 reste active.
+
+**Il faut obligatoirement créer V3 avant de demander sa comparaison.** L'opération `pipeline` ne lance pas d'entraînement.
+
+#### 4. Vérifier la version active
+
+Sur la VM :
+
+```bash
+curl http://127.0.0.1:3001/modele/version
+```
+
+L'API renvoie la version réellement chargée, par exemple :
+
+```json
+{
+  "version": "v3"
+}
+```
+
+Ce résultat n'est attendu que si V3 a été activée avec succès.
+
+#### 5. Revenir à la version précédente
+
+En cas de problème après activation, ouvrir **Actions → MLOps - Frenchcab → Run workflow**, puis sélectionner `rollback`.
+
+Cette opération restaure la version précédente enregistrée dans `version_active.json`, redémarre le backend et vérifie la version exposée par l'API.
+
+Aucun réentraînement n'est nécessaire.
+
+**Important :** le versionnement est propre à chaque environnement. Une V3 entraînée localement n'apparaît pas automatiquement sur la VM, et inversement. Les fichiers de modèles ne sont pas synchronisés par GitHub Actions.
+
 ## Déploiement CI/CD et MLOPS
 
 ### Architecture CI/CD et MLOps
